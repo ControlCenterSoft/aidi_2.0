@@ -83,7 +83,6 @@ func TestSameIdempotencyKeyIsDuplicateAcrossRedeliveryID(t *testing.T) {
 	}
 }
 
-
 func TestSameIdempotencyKeyDifferentConsumerIsNotDuplicate(t *testing.T) {
 	received := time.Date(2026, 9, 26, 19, 2, 30, 0, time.UTC)
 	existing, _ := NewInboxRecord(InboxRecord{
