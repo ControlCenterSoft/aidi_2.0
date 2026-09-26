@@ -21,3 +21,7 @@ Development started on 2026-09-26 from the approved AIDI v2.0.0 baseline.
 - Web application builds successfully
 - Draft PR from `development` to `main` is open
 - Release A backlog remains governed by `docs/ROADMAP.md` and `docs/SPEC.md`
+
+## Isolation invariant
+
+This GitHub development track is isolated from the current/legacy AIDI development environment. No current AIDI VM, queue, runner, repository, database, task state or generated artifact may be used as an execution dependency for this track. GitHub Actions currently runs only on GitHub-hosted `ubuntu-latest` runners.
