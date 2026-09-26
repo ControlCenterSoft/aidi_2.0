@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -32,11 +33,11 @@ func main() {
 	slog.SetDefault(logger)
 
 	build := buildinfo.New(version, commit, buildTime)
-	ready := false
+	var ready atomic.Bool
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", health.Live(build))
-	mux.HandleFunc("/ready", health.Ready(build, func() bool { return ready }))
+	mux.HandleFunc("/ready", health.Ready(build, ready.Load))
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -52,7 +53,7 @@ func main() {
 			"commit", build.Commit,
 			"build_time", build.BuildTime,
 		)
-		ready = true
+		ready.Store(true)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
@@ -69,7 +70,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	ready = false
+	ready.Store(false)
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
