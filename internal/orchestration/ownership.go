@@ -21,15 +21,15 @@ const (
 )
 
 var (
-	ErrInvalidLeaseTTL         = errors.New("invalid lease ttl")
-	ErrInvalidAttempt          = errors.New("invalid attempt binding")
-	ErrLeaseHeld               = errors.New("workflow lease already held")
-	ErrLeaseExpired            = errors.New("workflow lease expired")
-	ErrStaleFence              = errors.New("stale fencing token")
-	ErrNotOwned                = errors.New("workflow is not owned")
-	ErrReconciliationRequired  = errors.New("workflow reconciliation required")
-	ErrFenceExhausted          = errors.New("fencing token exhausted")
-	ErrOwnershipInvariant      = errors.New("ownership invariant violation")
+	ErrInvalidLeaseTTL        = errors.New("invalid lease ttl")
+	ErrInvalidAttempt         = errors.New("invalid attempt binding")
+	ErrLeaseHeld              = errors.New("workflow lease already held")
+	ErrLeaseExpired           = errors.New("workflow lease expired")
+	ErrStaleFence             = errors.New("stale fencing token")
+	ErrNotOwned               = errors.New("workflow is not owned")
+	ErrReconciliationRequired = errors.New("workflow reconciliation required")
+	ErrFenceExhausted         = errors.New("fencing token exhausted")
+	ErrOwnershipInvariant     = errors.New("ownership invariant violation")
 )
 
 type AttemptBinding struct {
