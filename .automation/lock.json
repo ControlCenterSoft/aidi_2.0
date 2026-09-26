@@ -1,8 +1,8 @@
 {
-  "state": "idle",
-  "owner": null,
-  "started_at": null,
-  "lease_until": null,
+  "state": "active",
+  "owner": "ai-recovery-:40",
+  "started_at": "2026-09-26T21:37:27+02:00",
+  "lease_until": "2026-09-26T22:22:27+02:00",
   "last_completed_cycle": null,
   "note": "GitHub-only scheduler lease. Not part of product source or local AIDI runtime."
 }
