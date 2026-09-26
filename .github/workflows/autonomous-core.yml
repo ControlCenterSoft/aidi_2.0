@@ -152,8 +152,8 @@ jobs:
           set -euo pipefail
           issue="${{ steps.plan.outputs.issue }}"
           copilot -p "
-          Implement GitHub issue #$issue in this repository. Read the issue and the approved
-          docs/SPEC.md and docs/ROADMAP.md. Keep the change strictly to one bounded Release A
+          Implement the task described in /tmp/aidi-plan.md for GitHub issue #$issue.
+          Read that plan plus the approved docs/SPEC.md and docs/ROADMAP.md. Keep the change strictly to one bounded Release A
           Foundation slice. Add or update tests and documentation required by the contract.
 
           Do not commit, push, open/merge PRs, change GitHub settings, or access any local AIDI,
