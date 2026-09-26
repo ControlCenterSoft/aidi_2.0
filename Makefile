@@ -6,9 +6,11 @@ check:
 	go test -race ./...
 	cd web && npm run build
 	PYTHONPATH=workers/src python -c "from aidi_worker import health; assert health()['status'] == 'ok'"
+	PYTHONPATH=workers/src python -m unittest discover -s workers/tests -v
 
 test:
 	go test -race ./...
+	PYTHONPATH=workers/src python -m unittest discover -s workers/tests -v
 
 build:
 	mkdir -p bin
