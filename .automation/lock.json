@@ -1,0 +1,8 @@
+{
+  "state": "idle",
+  "owner": null,
+  "started_at": null,
+  "lease_until": null,
+  "last_completed_cycle": null,
+  "note": "GitHub-only scheduler lease. Not part of product source or local AIDI runtime."
+}
