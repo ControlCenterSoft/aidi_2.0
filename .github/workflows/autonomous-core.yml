@@ -1,0 +1,397 @@
+name: AIDI Autonomous Core
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "10 * * * *"
+
+permissions:
+  actions: write
+  contents: write
+  issues: write
+  pull-requests: write
+  copilot-requests: write
+
+jobs:
+  release-a-core:
+    if: github.repository == 'ControlCenterSoft/aidi_2.0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      LEASE_OWNER: "core-:10"
+      COPILOT_VERSION: "1.0.88"
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Acquire GitHub scheduler lease
+        id: lease
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          lock_endpoint="repos/$REPO/contents/.automation/lock.json?ref=automation-control"
+          lock_json="$(gh api "$lock_endpoint")"
+          lock_sha="$(jq -r '.sha' <<<"$lock_json")"
+          lock_content="$(jq -r '.content' <<<"$lock_json" | base64 -d)"
+          state="$(jq -r '.state' <<<"$lock_content")"
+          lease_until="$(jq -r '.lease_until // empty' <<<"$lock_content")"
+          now_epoch="$(date -u +%s)"
+
+          active_previous_work() {
+            local prs runs
+            prs="$(gh pr list --repo "$REPO" --state open --limit 100               --json headRefName,baseRefName |               jq '[.[] | select((.headRefName | startswith("automation/")) or .headRefName == "development")] | length')"
+            runs="$(gh run list --repo "$REPO" --limit 100               --json databaseId,status |               jq --argjson current "$GITHUB_RUN_ID"                 '[.[] | select((.status == "queued" or .status == "in_progress") and .databaseId != $current)] | length')"
+            test "$prs" -gt 0 || test "$runs" -gt 0
+          }
+
+          update_lock() {
+            local source_json="$1"
+            local expected_sha="$2"
+            local message="$3"
+            local encoded
+            encoded="$(printf '%s\n' "$source_json" | base64 -w0)"
+            gh api --method PUT "repos/$REPO/contents/.automation/lock.json"               -f message="$message"               -f content="$encoded"               -f sha="$expected_sha"               -f branch="automation-control" >/dev/null
+          }
+
+          if [[ "$state" == "active" && -n "$lease_until" ]]; then
+            lease_epoch="$(date -u -d "$lease_until" +%s)"
+            if (( lease_epoch > now_epoch )); then
+              echo "acquired=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            if active_previous_work; then
+              extended="$(jq --arg until "$(date -u -d '+45 minutes' +%Y-%m-%dT%H:%M:%SZ)"                 '.lease_until=$until' <<<"$lock_content")"
+              if ! update_lock "$extended" "$lock_sha" "chore(automation): extend active lease"; then
+                echo "acquired=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "acquired=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          acquired="$(jq             --arg owner "$LEASE_OWNER"             --arg started "$(date -u +%Y-%m-%dT%H:%M:%SZ)"             --arg until "$(date -u -d '+45 minutes' +%Y-%m-%dT%H:%M:%SZ)"             '.state="active" | .owner=$owner | .started_at=$started | .lease_until=$until'             <<<"$lock_content")"
+
+          if update_lock "$acquired" "$lock_sha" "chore(automation): acquire $LEASE_OWNER lease"; then
+            echo "acquired=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "acquired=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify previous GitHub cycle is complete
+        id: previous
+        if: steps.lease.outputs.acquired == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          prs="$(gh pr list --repo "$REPO" --state open --limit 100             --json headRefName,baseRefName |             jq '[.[] | select((.headRefName | startswith("automation/")) or .headRefName == "development")] | length')"
+          runs="$(gh run list --repo "$REPO" --limit 100             --json databaseId,status |             jq --argjson current "$GITHUB_RUN_ID"               '[.[] | select((.status == "queued" or .status == "in_progress") and .databaseId != $current)] | length')"
+          if [[ "$prs" -gt 0 || "$runs" -gt 0 ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install pinned Copilot CLI
+        if: steps.lease.outputs.acquired == 'true' && steps.previous.outputs.ready == 'true'
+        run: npm install -g "@github/copilot@$COPILOT_VERSION"
+
+      - name: Select one READY Release A Foundation slice
+        id: plan
+        if: steps.lease.outputs.acquired == 'true' && steps.previous.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          copilot -p '
+          Work only in this checked-out repository. Read docs/SPEC.md, docs/ROADMAP.md,
+          docs/FOUNDATION.md and the current source tree. Select exactly one small,
+          dependency-ready Release A Foundation slice that is not already implemented.
+          Priority: core/domain contracts, canonical state, configuration, API boundaries,
+          architecture primitives. Do not modify any file. Do not use external/local AIDI,
+          Forgejo, VMs, runners, queues, databases or state.
+
+          Return concise Markdown only:
+          first line must be "# <issue title>";
+          then Scope, Acceptance criteria, and Evidence expected.
+          The slice must fit one PR and be independently testable.
+          '             -s             --allow-tool='read,shell(git log:*),shell(git status),shell(grep:*),shell(find:*)'             --no-ask-user > /tmp/aidi-plan.md
+
+          title="$(sed -n '1s/^# //p' /tmp/aidi-plan.md)"
+          test -n "$title"
+          issue_url="$(gh issue create --repo "$REPO" --title "$title" --body-file /tmp/aidi-plan.md)"
+          issue_number="${issue_url##*/}"
+          echo "issue=$issue_number" >> "$GITHUB_OUTPUT"
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+
+      - name: Create isolated automation branch
+        if: steps.plan.outputs.issue != ''
+        id: branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue="${{ steps.plan.outputs.issue }}"
+          branch="automation/core-${issue}-${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch" origin/main
+          echo "name=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Implement bounded slice with Copilot CLI
+        if: steps.plan.outputs.issue != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue="${{ steps.plan.outputs.issue }}"
+          copilot -p "
+          Implement the task described in /tmp/aidi-plan.md for GitHub issue #$issue.
+          Read that plan plus the approved docs/SPEC.md and docs/ROADMAP.md. Keep the change strictly to one bounded Release A
+          Foundation slice. Add or update tests and documentation required by the contract.
+
+          Do not commit, push, open/merge PRs, change GitHub settings, or access any local AIDI,
+          Forgejo, VM, self-hosted runner, queue, database, file or state outside this checkout.
+          You may edit repository files and run deterministic local checks only.
+          "             -s             --add-dir=/tmp             --allow-tool='read,write,shell(go:*),shell(gofmt:*),shell(python:*),shell(npm:*),shell(node:*),shell(git status),shell(git diff:*),shell(grep:*),shell(find:*),shell(mkdir:*)'             --no-ask-user
+
+      - name: Deterministic pre-PR checks
+        if: steps.plan.outputs.issue != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          lock_was_tracked=false
+          if git ls-files --error-unmatch web/package-lock.json >/dev/null 2>&1; then
+            lock_was_tracked=true
+          fi
+
+          test -z "$(gofmt -l .)"
+          go mod verify
+          go vet ./...
+          go test -race ./...
+          python -m compileall -q workers/src workers/tests
+          PYTHONPATH=workers/src python -m unittest discover -s workers/tests -v
+          (
+            cd web
+            npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+            npm ci --ignore-scripts --no-audit --no-fund
+            npm run build
+          )
+
+          if [[ "$lock_was_tracked" == "false" ]]; then
+            rm -f web/package-lock.json
+          fi
+          test -n "$(git status --porcelain)"
+
+      - name: Commit and push automation branch
+        if: steps.plan.outputs.issue != ''
+        id: commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          git commit -m "feat(release-a): autonomous foundation slice (#${{ steps.plan.outputs.issue }})"
+          git push origin "HEAD:${{ steps.branch.outputs.name }}"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Open draft PR
+        if: steps.commit.outputs.sha != ''
+        id: pr
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr_url="$(gh pr create --repo "$REPO" --draft --base main             --head "${{ steps.branch.outputs.name }}"             --title "${{ steps.plan.outputs.title }}"             --body "Automated GitHub-only Release A slice.
+
+          Closes #${{ steps.plan.outputs.issue }}
+
+          Execution: GitHub-hosted runner only. Full CI is explicitly dispatched and awaited before merge.")"
+          echo "number=${pr_url##*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch full CI, repair once, and await green
+        if: steps.pr.outputs.number != ''
+        id: ci
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="${{ steps.branch.outputs.name }}"
+          sha="${{ steps.commit.outputs.sha }}"
+          issue="${{ steps.plan.outputs.issue }}"
+
+          dispatch_and_wait() {
+            local target_sha="$1"
+            gh workflow run ci.yml --repo "$REPO" --ref "$branch"
+
+            RUN_ID=""
+            for _ in $(seq 1 30); do
+              RUN_ID="$(gh run list --repo "$REPO" --workflow ci.yml --branch "$branch"                 --event workflow_dispatch --limit 10 --json databaseId,headSha |                 jq -r --arg sha "$target_sha" '.[] | select(.headSha == $sha) | .databaseId' | head -n1)"
+              [[ -n "$RUN_ID" ]] && break
+              sleep 4
+            done
+            test -n "$RUN_ID"
+
+            set +e
+            gh run watch "$RUN_ID" --repo "$REPO" --exit-status
+            WATCH_STATUS=$?
+            set -e
+          }
+
+          dispatch_and_wait "$sha"
+
+          if [[ "$WATCH_STATUS" -ne 0 ]]; then
+            gh run view "$RUN_ID" --repo "$REPO" --log-failed > /tmp/aidi-ci-failed.log || true
+
+            copilot -p "
+            Repair the implementation for GitHub issue #$issue. The authoritative task plan is
+            /tmp/aidi-plan.md and the failed GitHub-hosted CI evidence is
+            /tmp/aidi-ci-failed.log. Make only the smallest changes needed to satisfy the issue
+            and restore all deterministic checks. Do not commit, push, open/merge PRs, change
+            GitHub settings, or access any local AIDI, Forgejo, VM, self-hosted runner, queue,
+            database, file or state outside this checkout.
+            "               -s               --add-dir=/tmp               --allow-tool='read,write,shell(go:*),shell(gofmt:*),shell(python:*),shell(npm:*),shell(node:*),shell(git status),shell(git diff:*),shell(grep:*),shell(find:*),shell(mkdir:*)'               --no-ask-user
+
+            lock_was_tracked=false
+            if git ls-files --error-unmatch web/package-lock.json >/dev/null 2>&1; then
+              lock_was_tracked=true
+            fi
+            test -z "$(gofmt -l .)"
+            go mod verify
+            go vet ./...
+            go test -race ./...
+            python -m compileall -q workers/src workers/tests
+            PYTHONPATH=workers/src python -m unittest discover -s workers/tests -v
+            (
+              cd web
+              npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+              npm ci --ignore-scripts --no-audit --no-fund
+              npm run build
+            )
+            if [[ "$lock_was_tracked" == "false" ]]; then
+              rm -f web/package-lock.json
+            fi
+
+            test -n "$(git status --porcelain)"
+            git add -A
+            git commit -m "fix(release-a): address CI findings (#$issue)"
+            git push origin "HEAD:$branch"
+            sha="$(git rev-parse HEAD)"
+
+            dispatch_and_wait "$sha"
+            [[ "$WATCH_STATUS" -eq 0 ]]
+          fi
+
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Mark PR ready and verify mergeability
+        if: steps.ci.outputs.run_id != ''
+        id: mergecheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr="${{ steps.pr.outputs.number }}"
+          gh pr ready "$pr" --repo "$REPO"
+
+          state=""
+          for _ in $(seq 1 20); do
+            state="$(gh pr view "$pr" --repo "$REPO" --json mergeStateStatus --jq '.mergeStateStatus')"
+            [[ "$state" == "CLEAN" ]] && break
+            if [[ "$state" == "DIRTY" || "$state" == "BLOCKED" || "$state" == "UNSTABLE" ]]; then
+              echo "PR is not cleanly mergeable: $state" >&2
+              exit 1
+            fi
+            sleep 3
+          done
+          [[ "$state" == "CLEAN" ]]
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Merge green PR
+        if: steps.mergecheck.outputs.ready == 'true'
+        id: merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr="${{ steps.pr.outputs.number }}"
+          gh pr merge "$pr" --repo "$REPO" --merge --delete-branch
+          git fetch origin main
+          echo "main_sha=$(git rev-parse origin/main)" >> "$GITHUB_OUTPUT"
+
+      - name: Validate merged main with explicit CI
+        if: steps.merge.outputs.main_sha != ''
+        id: mainci
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="${{ steps.merge.outputs.main_sha }}"
+          gh workflow run ci.yml --repo "$REPO" --ref main
+          run_id=""
+          for _ in $(seq 1 30); do
+            run_id="$(gh run list --repo "$REPO" --workflow ci.yml --branch main               --event workflow_dispatch --limit 10 --json databaseId,headSha |               jq -r --arg sha "$sha" '.[] | select(.headSha == $sha) | .databaseId' | head -n1)"
+            [[ -n "$run_id" ]] && break
+            sleep 4
+          done
+          test -n "$run_id"
+          gh run watch "$run_id" --repo "$REPO" --exit-status
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Fast-forward development and validate it
+        if: steps.mainci.outputs.run_id != ''
+        id: devci
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main development
+          git merge-base --is-ancestor origin/development origin/main
+          git push origin "refs/remotes/origin/main:refs/heads/development"
+
+          sha="${{ steps.merge.outputs.main_sha }}"
+          gh workflow run ci.yml --repo "$REPO" --ref development
+          run_id=""
+          for _ in $(seq 1 30); do
+            run_id="$(gh run list --repo "$REPO" --workflow ci.yml --branch development               --event workflow_dispatch --limit 10 --json databaseId,headSha |               jq -r --arg sha "$sha" '.[] | select(.headSha == $sha) | .databaseId' | head -n1)"
+            [[ -n "$run_id" ]] && break
+            sleep 4
+          done
+          test -n "$run_id"
+          gh run watch "$run_id" --repo "$REPO" --exit-status
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Release lease
+        if: always() && steps.lease.outputs.acquired == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          lock_json="$(gh api "repos/$REPO/contents/.automation/lock.json?ref=automation-control")"
+          lock_sha="$(jq -r '.sha' <<<"$lock_json")"
+          lock_content="$(jq -r '.content' <<<"$lock_json" | base64 -d)"
+          owner="$(jq -r '.owner // empty' <<<"$lock_content")"
+          [[ "$owner" == "$LEASE_OWNER" ]] || exit 0
+
+          if [[ "${{ job.status }}" == "success" && -n "${{ steps.devci.outputs.run_id }}" ]]; then
+            released="$(jq               --arg completed "$(date -u +%Y-%m-%dT%H:%M:%SZ)"               --argjson issue "${{ steps.plan.outputs.issue || '0' }}"               --argjson pr "${{ steps.pr.outputs.number || '0' }}"               --arg main_sha "${{ steps.merge.outputs.main_sha }}"               --argjson pr_ci "${{ steps.ci.outputs.run_id || '0' }}"               --argjson main_ci "${{ steps.mainci.outputs.run_id || '0' }}"               --argjson dev_ci "${{ steps.devci.outputs.run_id || '0' }}"               '.state="idle"
+               | .owner=null
+               | .started_at=null
+               | .lease_until=null
+               | .last_completed_cycle={
+                   owner:"core-:10",
+                   completed_at:$completed,
+                   issue:$issue,
+                   pull_request:$pr,
+                   main_sha:$main_sha,
+                   ci:{
+                     pull_request_run:$pr_ci,
+                     main_push_run:$main_ci,
+                     development_push_run:$dev_ci
+                   }
+                 }' <<<"$lock_content")"
+          else
+            released="$(jq '.state="idle" | .owner=null | .started_at=null | .lease_until=null' <<<"$lock_content")"
+          fi
+
+          encoded="$(printf '%s\n' "$released" | base64 -w0)"
+          gh api --method PUT "repos/$REPO/contents/.automation/lock.json"             -f message="chore(automation): release $LEASE_OWNER lease"             -f content="$encoded"             -f sha="$lock_sha"             -f branch="automation-control" >/dev/null
