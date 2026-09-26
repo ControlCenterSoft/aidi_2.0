@@ -44,23 +44,19 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("AIDI_LOG_LEVEL must be one of debug, info, warn, error")
 	}
 
-	if cfg.HTTPAddr == "" {
-		return Config{}, fmt.Errorf("AIDI_HTTP_ADDR must not be empty")
-	}
-
 	return cfg, nil
 }
 
 func envOrDefault(key, fallback string) string {
-	if value, ok := os.LookupEnv(key); ok {
+	if value := os.Getenv(key); value != "" {
 		return value
 	}
 	return fallback
 }
 
 func BoolEnv(key string, fallback bool) (bool, error) {
-	raw, ok := os.LookupEnv(key)
-	if !ok {
+	raw := os.Getenv(key)
+	if raw == "" {
 		return fallback, nil
 	}
 	value, err := strconv.ParseBool(raw)
