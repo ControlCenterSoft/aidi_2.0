@@ -3,28 +3,56 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/ControlCenterSoft/aidi_2.0/internal/buildinfo"
+	"github.com/ControlCenterSoft/aidi_2.0/internal/config"
 	"github.com/ControlCenterSoft/aidi_2.0/internal/health"
 )
 
-var version = "dev"
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildTime = "unknown"
+)
 
 func main() {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", health.Handler(version))
+	cfg, err := config.Load()
+	if err != nil {
+		slog.Error("invalid configuration", "error", err)
+		os.Exit(2)
+	}
 
-	addr := envOrDefault("AIDI_HTTP_ADDR", ":8080")
-	server := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel(cfg.LogLevel)}))
+	slog.SetDefault(logger)
+
+	build := buildinfo.New(version, commit, buildTime)
+	ready := false
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", health.Live(build))
+	mux.HandleFunc("/ready", health.Ready(build, func() bool { return ready }))
+
+	server := &http.Server{
+		Addr:              cfg.HTTPAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("AIDI core starting on %s", addr)
+		slog.Info("aidi core starting",
+			"addr", cfg.HTTPAddr,
+			"version", build.Version,
+			"commit", build.Commit,
+			"build_time", build.BuildTime,
+		)
+		ready = true
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
@@ -35,20 +63,31 @@ func main() {
 
 	select {
 	case <-ctx.Done():
+		slog.Info("shutdown signal received")
 	case err := <-errCh:
-		log.Fatal(err)
+		slog.Error("server failed", "error", err)
+		os.Exit(1)
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ready = false
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("shutdown error: %v", err)
+		slog.Error("graceful shutdown failed", "error", err)
+		os.Exit(1)
 	}
+	slog.Info("aidi core stopped")
 }
 
-func envOrDefault(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+func logLevel(level string) slog.Level {
+	switch level {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
 	}
-	return fallback
 }
