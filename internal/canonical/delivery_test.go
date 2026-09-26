@@ -83,6 +83,29 @@ func TestSameIdempotencyKeyIsDuplicateAcrossRedeliveryID(t *testing.T) {
 	}
 }
 
+
+func TestSameIdempotencyKeyDifferentConsumerIsNotDuplicate(t *testing.T) {
+	received := time.Date(2026, 9, 26, 19, 2, 30, 0, time.UTC)
+	existing, _ := NewInboxRecord(InboxRecord{
+		Delivery:       DeliveryKey{Consumer: "planner", MessageID: "msg-001"},
+		IdempotencyKey: "cmd-001",
+		ReceivedAt:     received,
+	})
+	incoming, _ := NewInboxRecord(InboxRecord{
+		Delivery:       DeliveryKey{Consumer: "executor", MessageID: "msg-002"},
+		IdempotencyKey: "cmd-001",
+		ReceivedAt:     received.Add(time.Second),
+	})
+
+	got, err := DuplicateDelivery(&existing, incoming)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got {
+		t.Fatal("idempotency keys must be scoped to the consumer")
+	}
+}
+
 func TestDistinctDeliveryMayProceed(t *testing.T) {
 	received := time.Date(2026, 9, 26, 19, 3, 0, 0, time.UTC)
 	existing, _ := NewInboxRecord(InboxRecord{
