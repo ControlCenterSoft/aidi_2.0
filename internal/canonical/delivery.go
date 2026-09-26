@@ -135,8 +135,9 @@ func DuplicateDelivery(existing *InboxRecord, incoming InboxRecord) (bool, error
 	if err := existing.Validate(); err != nil {
 		return false, fmt.Errorf("existing inbox record: %w", err)
 	}
-	return existing.Delivery.Equal(incoming.Delivery) ||
-		existing.IdempotencyKey == incoming.IdempotencyKey, nil
+	sameScopedIdempotency := existing.Delivery.Consumer == incoming.Delivery.Consumer &&
+		existing.IdempotencyKey == incoming.IdempotencyKey
+	return existing.Delivery.Equal(incoming.Delivery) || sameScopedIdempotency, nil
 }
 
 func DuplicateSideEffect(existing *SideEffectRecord, incoming SideEffectRecord) (bool, error) {
