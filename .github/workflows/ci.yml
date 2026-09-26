@@ -19,12 +19,26 @@ jobs:
           go-version: "1.24.x"
       - name: Formatting
         run: test -z "$(gofmt -l .)"
+      - name: Module integrity
+        run: go mod verify
       - name: Vet
         run: go vet ./...
       - name: Unit tests
         run: go test -race -coverprofile=coverage.out ./...
       - name: Build
-        run: go build -trimpath -ldflags "-X main.version=ci -X main.commit=${GITHUB_SHA} -X main.buildTime=ci" ./cmd/aidi
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags "-X main.version=ci -X main.commit=${GITHUB_SHA} -X main.buildTime=ci" -o dist/aidi ./cmd/aidi
+          sha256sum dist/aidi > dist/aidi.sha256
+      - name: Export qualification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: aidi-core
+          path: |
+            dist/aidi
+            dist/aidi.sha256
+            coverage.out
+          if-no-files-found: error
 
   python:
     runs-on: ubuntu-latest
