@@ -35,6 +35,21 @@ Secrets are intentionally absent from the baseline configuration.
 6. On SIGINT/SIGTERM, remove readiness.
 7. Perform bounded graceful shutdown.
 
+## Worker and recovery contracts
+
+The Python worker package now defines infrastructure-agnostic Release A primitives:
+
+- worker request/result contracts with evidence required for successful results;
+- capability-based model deployments and deterministic selection;
+- local-first routing: local qualified deployments are preferred, and a local-required request can never fall through to cloud;
+- normalized failure classes and failure kinds;
+- retry guards that prevent unchanged deterministic failures from blind retry;
+- lease/ownership uncertainty that forces reconciliation before any retry/side effect;
+- bounded transient retry budget and escalation when exhausted;
+- recovery evidence rules that prevent workflow resume before recovery is proven.
+
+These contracts contain no model runtime, GPU, VM, Forgejo, local queue, or current-AIDI dependency. Concrete adapters remain later Release A/D/G work.
+
 ## Qualification
 
 The GitHub-only CI gate validates:
@@ -44,6 +59,7 @@ The GitHub-only CI gate validates:
 - race-enabled Go unit tests.
 - Go binary build with injected build metadata.
 - Python source compilation and worker smoke test.
+- Python worker/recovery contract unit tests.
 - React/TypeScript/Vite production build.
 
 This GitHub development track remains isolated from all current/legacy AIDI execution infrastructure.
