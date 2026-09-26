@@ -37,3 +37,13 @@ AIDI v2.0.0 — autonomous AI development infrastructure.
 - [Controlled Cutover Plan](docs/CUTOVER.md)
 
 The documents above are synchronized from the approved Google Drive baseline. Secrets and credentials must never be committed to this repository.
+
+## Development isolation
+
+GitHub development is a standalone AIDI 2.0 track.
+
+- Do not consume tasks, state, artifacts, databases, queues, Forgejo repositories, VMs, runners, or work-in-progress from the current/legacy AIDI development environment.
+- Do not push GitHub-development changes back into the current/legacy AIDI environment automatically.
+- CI must use GitHub-hosted runners unless a separate GitHub-only runner pool is explicitly approved later.
+- The canonical source for this track is this GitHub repository.
+- Cross-contamination between the current environment and GitHub development is treated as a blocking defect.
