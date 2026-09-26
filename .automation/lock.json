@@ -1,8 +1,8 @@
 {
-  "state": "active",
-  "owner": "core-:10",
-  "started_at": "2026-09-26T21:11:06Z",
-  "lease_until": "2026-09-26T21:56:06Z",
+  "state": "idle",
+  "owner": null,
+  "started_at": null,
+  "lease_until": null,
   "last_completed_cycle": {
     "owner": "core-:10",
     "completed_at": "2026-09-26T20:43:30Z",
