@@ -1,0 +1,62 @@
+name: AIDI CI
+
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+      - name: Formatting
+        run: test -z "$(gofmt -l .)"
+      - name: Vet
+        run: go vet ./...
+      - name: Unit tests
+        run: go test -race -coverprofile=coverage.out ./...
+      - name: Build
+        run: go build -trimpath -ldflags "-X main.version=ci -X main.commit=${GITHUB_SHA} -X main.buildTime=ci" ./cmd/aidi
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile
+        run: python -m compileall -q workers/src
+      - name: Worker smoke test
+        run: PYTHONPATH=workers/src python -c "from aidi_worker import health; assert health()['status'] == 'ok'"
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Generate lockfile
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Install from lockfile
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Build
+        run: npm run build
+      - name: Export generated lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-lockfile
+          path: web/package-lock.json
+          if-no-files-found: error

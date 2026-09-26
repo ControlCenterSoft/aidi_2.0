@@ -1,0 +1,21 @@
+# Go
+/bin/
+*.test
+coverage.out
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Node
+node_modules/
+dist/
+
+# Local
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+.DS_Store
