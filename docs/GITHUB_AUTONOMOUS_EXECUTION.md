@@ -46,6 +46,14 @@ The hourly `:10` cycle performs one bounded Release A Foundation slice:
 13. fast-forward `development` to `main` without force and explicitly validate it with CI;
 14. atomically release the lease and record completion evidence.
 
+## Selector robustness
+
+The Release A selector is allowed to emit brief explanatory text before its Markdown issue heading. The workflow normalizes selector output from the first top-level `# <issue title>` heading onward instead of assuming the H1 is the first byte of stdout.
+
+A non-zero Copilot exit or output without a usable H1 is logged with bounded diagnostics and retried once. A second failure stops the cycle and releases the lease; it never creates an issue from ambiguous output.
+
+Because `web/package-lock.json` is now pinned in the repository, autonomous pre-PR and repair checks use `npm ci` directly. They do not regenerate the lockfile.
+
 ## Why CI is explicitly dispatched
 
 GitHub suppresses most new workflow runs caused by writes made with a repository `GITHUB_TOKEN`. The supported exception is `workflow_dispatch`. Therefore automation-created branch/PR writes do not rely on implicit push/PR events for qualification; the autonomous workflow explicitly dispatches `ci.yml` and waits for the result.

@@ -111,7 +111,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          copilot -p '
+
+          cat > /tmp/aidi-selector-prompt.txt <<'PROMPT'
           Work only in this checked-out repository. Read docs/SPEC.md, docs/ROADMAP.md,
           docs/FOUNDATION.md and the current source tree. Select exactly one small,
           dependency-ready Release A Foundation slice that is not already implemented.
@@ -119,14 +120,43 @@ jobs:
           architecture primitives. Do not modify any file. Do not use external/local AIDI,
           Forgejo, VMs, runners, queues, databases or state.
 
-          Return concise Markdown only:
-          first line must be "# <issue title>";
+          Return concise Markdown:
+          include exactly one top-level "# <issue title>" heading;
           then Scope, Acceptance criteria, and Evidence expected.
           The slice must fit one PR and be independently testable.
-          '             -s             --allow-tool='read,shell(git log:*),shell(git status),shell(grep:*),shell(find:*)'             --no-ask-user > /tmp/aidi-plan.md
+          PROMPT
+
+          run_selector() {
+            local status title
+            set +e
+            copilot -p "$(cat /tmp/aidi-selector-prompt.txt)"               -s               --allow-tool='read,shell(git log:*),shell(git status),shell(grep:*),shell(find:*)'               --no-ask-user               > /tmp/aidi-plan.raw.md 2> /tmp/aidi-plan.err
+            status=$?
+            set -e
+
+            if [[ "$status" -ne 0 ]]; then
+              echo "Copilot selector exited with status $status" >&2
+              sed -n '1,220p' /tmp/aidi-plan.err >&2
+              return "$status"
+            fi
+
+            awk 'found || /^# / { found=1; print }' /tmp/aidi-plan.raw.md > /tmp/aidi-plan.md
+            title="$(sed -n '1s/^# //p' /tmp/aidi-plan.md)"
+            if [[ -z "$title" ]]; then
+              echo "Copilot selector returned no Markdown H1 title." >&2
+              echo "--- selector stdout ---" >&2
+              sed -n '1,220p' /tmp/aidi-plan.raw.md >&2
+              echo "--- selector stderr ---" >&2
+              sed -n '1,220p' /tmp/aidi-plan.err >&2
+              return 2
+            fi
+          }
+
+          if ! run_selector; then
+            echo "Retrying selector once after non-actionable output." >&2
+            run_selector
+          fi
 
           title="$(sed -n '1s/^# //p' /tmp/aidi-plan.md)"
-          test -n "$title"
           issue_url="$(gh issue create --repo "$REPO" --title "$title" --body-file /tmp/aidi-plan.md)"
           issue_number="${issue_url##*/}"
           echo "issue=$issue_number" >> "$GITHUB_OUTPUT"
@@ -166,11 +196,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          lock_was_tracked=false
-          if git ls-files --error-unmatch web/package-lock.json >/dev/null 2>&1; then
-            lock_was_tracked=true
-          fi
-
           test -z "$(gofmt -l .)"
           go mod verify
           go vet ./...
@@ -179,14 +204,10 @@ jobs:
           PYTHONPATH=workers/src python -m unittest discover -s workers/tests -v
           (
             cd web
-            npm install --package-lock-only --ignore-scripts --no-audit --no-fund
             npm ci --ignore-scripts --no-audit --no-fund
             npm run build
           )
 
-          if [[ "$lock_was_tracked" == "false" ]]; then
-            rm -f web/package-lock.json
-          fi
           test -n "$(git status --porcelain)"
 
       - name: Commit and push automation branch
@@ -255,10 +276,6 @@ jobs:
             database, file or state outside this checkout.
             "               -s               --add-dir=/tmp               --allow-tool='read,write,shell(go:*),shell(gofmt:*),shell(python:*),shell(npm:*),shell(node:*),shell(git status),shell(git diff:*),shell(grep:*),shell(find:*),shell(mkdir:*)'               --no-ask-user
 
-            lock_was_tracked=false
-            if git ls-files --error-unmatch web/package-lock.json >/dev/null 2>&1; then
-              lock_was_tracked=true
-            fi
             test -z "$(gofmt -l .)"
             go mod verify
             go vet ./...
@@ -267,13 +284,9 @@ jobs:
             PYTHONPATH=workers/src python -m unittest discover -s workers/tests -v
             (
               cd web
-              npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-              npm ci --ignore-scripts --no-audit --no-fund
+                npm ci --ignore-scripts --no-audit --no-fund
               npm run build
             )
-            if [[ "$lock_was_tracked" == "false" ]]; then
-              rm -f web/package-lock.json
-            fi
 
             test -n "$(git status --porcelain)"
             git add -A
