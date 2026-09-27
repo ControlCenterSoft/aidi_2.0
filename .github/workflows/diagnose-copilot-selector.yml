@@ -29,10 +29,10 @@ jobs:
           set -euo pipefail
           copilot --version
           copilot --help | sed -n '1,220p'
-      - name: Exercise exact selector prompt and capture diagnostics
+      - name: Qualify normalized selector contract
         run: |
-          set +e
-          copilot -p '
+          set -euo pipefail
+          cat > /tmp/selector-prompt.txt <<'PROMPT'
           Work only in this checked-out repository. Read docs/SPEC.md, docs/ROADMAP.md,
           docs/FOUNDATION.md and the current source tree. Select exactly one small,
           dependency-ready Release A Foundation slice that is not already implemented.
@@ -40,16 +40,25 @@ jobs:
           architecture primitives. Do not modify any file. Do not use external/local AIDI,
           Forgejo, VMs, runners, queues, databases or state.
 
-          Return concise Markdown only:
-          first line must be "# <issue title>";
+          Return concise Markdown:
+          include exactly one top-level "# <issue title>" heading;
           then Scope, Acceptance criteria, and Evidence expected.
           The slice must fit one PR and be independently testable.
-          ' -s --allow-tool='read,shell(git log:*),shell(git status),shell(grep:*),shell(find:*)' --no-ask-user > /tmp/copilot-out.txt 2> /tmp/copilot-err.txt
+          PROMPT
+
+          set +e
+          copilot -p "$(cat /tmp/selector-prompt.txt)" -s             --allow-tool='read,shell(git log:*),shell(git status),shell(grep:*),shell(find:*)'             --no-ask-user > /tmp/selector.raw.md 2> /tmp/selector.err
           status=$?
           set -e
           echo "exit_status=$status"
-          echo "--- stdout ---"
-          sed -n '1,220p' /tmp/copilot-out.txt
-          echo "--- stderr ---"
-          sed -n '1,220p' /tmp/copilot-err.txt
-          exit "$status"
+          if [[ "$status" -ne 0 ]]; then
+            sed -n '1,220p' /tmp/selector.err >&2
+            exit "$status"
+          fi
+
+          awk 'found || /^# / { found=1; print }' /tmp/selector.raw.md > /tmp/selector.md
+          title="$(sed -n '1s/^# //p' /tmp/selector.md)"
+          test -n "$title"
+          echo "normalized_title=$title"
+          echo "--- normalized plan ---"
+          sed -n '1,220p' /tmp/selector.md
