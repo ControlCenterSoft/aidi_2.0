@@ -1,18 +1,18 @@
 {
-  "state": "active",
-  "owner": "manual-core-recovery",
-  "started_at": "2026-09-27T13:49:14Z",
-  "lease_until": "2026-09-27T14:34:14Z",
+  "state": "idle",
+  "owner": null,
+  "started_at": null,
+  "lease_until": null,
   "last_completed_cycle": {
-    "owner": "manual-issue-3",
-    "completed_at": "2026-09-27T13:48:14Z",
-    "issue": 3,
-    "pull_request": 18,
-    "main_sha": "d4ef43f7c9a9e2910ae6a47ce14cf4fd0b548607",
+    "owner": "manual-core-recovery",
+    "completed_at": "2026-09-27T14:02:05Z",
+    "issue": 19,
+    "pull_request": 20,
+    "main_sha": "237ad9e71ba1561404c6dee1b253c3fc4355ca87",
     "ci": {
-      "pull_request_run": 36323446453,
-      "main_push_run": 36323526158,
-      "development_push_run": 36323582448
+      "pull_request_run": 36324199330,
+      "main_push_run": 36324280025,
+      "development_push_run": 36324369697
     }
   },
   "note": "GitHub-only scheduler lease. Not part of product source or local AIDI runtime."
