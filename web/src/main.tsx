@@ -1,14 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-
-function App() {
-  return (
-    <main>
-      <h1>AIDI 2.0</h1>
-      <p>Release A — Foundation is active.</p>
-    </main>
-  );
-}
+import App from "./app/App";
+import "./ui/design-system.css";
 
 const root = document.getElementById("root");
 if (!root) {
