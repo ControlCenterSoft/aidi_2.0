@@ -1,0 +1,43 @@
+name: Diagnose Copilot selector
+
+on:
+  push:
+    branches:
+      - automation/issue-19-copilot-selector
+
+permissions:
+  contents: read
+  copilot-requests: write
+
+jobs:
+  diagnose:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+      COPILOT_VERSION: "1.0.88"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: automation/issue-19-copilot-selector
+          fetch-depth: 0
+      - name: Install pinned Copilot CLI
+        run: npm install -g "@github/copilot@$COPILOT_VERSION"
+      - name: Show safe CLI metadata
+        run: |
+          set -euo pipefail
+          copilot --version
+          copilot --help | sed -n '1,220p'
+      - name: Exercise non-interactive prompt and capture diagnostics
+        run: |
+          set +e
+          copilot -p 'Return exactly: OK' -s --allow-tool='read' --no-ask-user > /tmp/copilot-out.txt 2> /tmp/copilot-err.txt
+          status=$?
+          set -e
+          echo "exit_status=$status"
+          echo "--- stdout ---"
+          sed -n '1,160p' /tmp/copilot-out.txt
+          echo "--- stderr ---"
+          sed -n '1,160p' /tmp/copilot-err.txt
+          exit "$status"
