@@ -29,15 +29,27 @@ jobs:
           set -euo pipefail
           copilot --version
           copilot --help | sed -n '1,220p'
-      - name: Exercise non-interactive prompt and capture diagnostics
+      - name: Exercise exact selector prompt and capture diagnostics
         run: |
           set +e
-          copilot -p 'Return exactly: OK' -s --allow-tool='read' --no-ask-user > /tmp/copilot-out.txt 2> /tmp/copilot-err.txt
+          copilot -p '
+          Work only in this checked-out repository. Read docs/SPEC.md, docs/ROADMAP.md,
+          docs/FOUNDATION.md and the current source tree. Select exactly one small,
+          dependency-ready Release A Foundation slice that is not already implemented.
+          Priority: core/domain contracts, canonical state, configuration, API boundaries,
+          architecture primitives. Do not modify any file. Do not use external/local AIDI,
+          Forgejo, VMs, runners, queues, databases or state.
+
+          Return concise Markdown only:
+          first line must be "# <issue title>";
+          then Scope, Acceptance criteria, and Evidence expected.
+          The slice must fit one PR and be independently testable.
+          ' -s --allow-tool='read,shell(git log:*),shell(git status),shell(grep:*),shell(find:*)' --no-ask-user > /tmp/copilot-out.txt 2> /tmp/copilot-err.txt
           status=$?
           set -e
           echo "exit_status=$status"
           echo "--- stdout ---"
-          sed -n '1,160p' /tmp/copilot-out.txt
+          sed -n '1,220p' /tmp/copilot-out.txt
           echo "--- stderr ---"
-          sed -n '1,160p' /tmp/copilot-err.txt
+          sed -n '1,220p' /tmp/copilot-err.txt
           exit "$status"
