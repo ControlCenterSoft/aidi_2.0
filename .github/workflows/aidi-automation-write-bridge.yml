@@ -1,0 +1,133 @@
+name: AIDI Automation Write Bridge
+
+on:
+  push:
+    branches:
+      - automation-control
+    paths:
+      - '.automation/commands/*.json'
+
+concurrency:
+  group: aidi-automation-write-bridge
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  apply-command:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout automation-control
+        uses: actions/checkout@v4
+        with:
+          ref: automation-control
+          fetch-depth: 2
+
+      - name: Apply bounded automation command
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          command_path="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- '.automation/commands/*.json' | head -n1)"
+          if [[ -z "$command_path" ]]; then
+            echo "No automation command in triggering commit."
+            exit 0
+          fi
+
+          op="$(jq -r '.op // empty' "$command_path")"
+          id="$(jq -r '.id // empty' "$command_path")"
+          if [[ ! "$id" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "Invalid command id"
+            exit 1
+          fi
+
+          mkdir -p .automation/results
+          result_path=".automation/results/${id}.json"
+          if [[ -f "$result_path" ]]; then
+            echo "Command already has a result: $result_path"
+            exit 0
+          fi
+
+          write_result() {
+            local status="$1"
+            local detail_json="$2"
+            jq -n               --arg id "$id"               --arg op "$op"               --arg status "$status"               --arg processed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"               --argjson detail "$detail_json"               '{id:$id,op:$op,status:$status,processed_at:$processed_at,detail:$detail}'               > "$result_path"
+          }
+
+          case "$op" in
+            create_issue)
+              title="$(jq -r '.title // empty' "$command_path")"
+              body="$(jq -r '.body // ""' "$command_path")"
+              [[ -n "$title" ]] || { echo "title required"; exit 1; }
+
+              payload="$(jq -n --arg title "$title" --arg body "$body" '{title:$title,body:$body}')"
+              response="$(gh api --method POST "repos/$REPO/issues" --input - <<<"$payload")"
+              number="$(jq -r '.number' <<<"$response")"
+              url="$(jq -r '.html_url' <<<"$response")"
+              write_result "success" "$(jq -n --argjson number "$number" --arg url "$url" '{issue_number:$number,url:$url}')"
+              ;;
+
+            create_pr)
+              title="$(jq -r '.title // empty' "$command_path")"
+              body="$(jq -r '.body // ""' "$command_path")"
+              head="$(jq -r '.head // empty' "$command_path")"
+              base="$(jq -r '.base // "main"' "$command_path")"
+              draft="$(jq -r '.draft // true' "$command_path")"
+
+              [[ -n "$title" ]] || { echo "title required"; exit 1; }
+              [[ "$head" == automation/* ]] || { echo "head must use automation/ prefix"; exit 1; }
+              [[ "$base" == "main" || "$base" == "development" ]] || { echo "base must be main or development"; exit 1; }
+              [[ "$draft" == "true" || "$draft" == "false" ]] || { echo "draft must be boolean"; exit 1; }
+
+              existing="$(gh api "repos/$REPO/pulls?state=open&head=$REPO_OWNER:$head" --jq '.[0] // empty')"
+              if [[ -n "$existing" ]]; then
+                number="$(jq -r '.number' <<<"$existing")"
+                url="$(jq -r '.html_url' <<<"$existing")"
+                write_result "success" "$(jq -n --argjson number "$number" --arg url "$url" --arg existing "true" '{pull_request:$number,url:$url,existing:($existing=="true")}')"
+              else
+                payload="$(jq -n                   --arg title "$title"                   --arg body "$body"                   --arg head "$head"                   --arg base "$base"                   --argjson draft "$draft"                   '{title:$title,body:$body,head:$head,base:$base,draft:$draft}')"
+                response="$(gh api --method POST "repos/$REPO/pulls" --input - <<<"$payload")"
+                number="$(jq -r '.number' <<<"$response")"
+                url="$(jq -r '.html_url' <<<"$response")"
+                write_result "success" "$(jq -n --argjson number "$number" --arg url "$url" '{pull_request:$number,url:$url,existing:false}')"
+              fi
+              ;;
+
+            release_lease)
+              requested_owner="$(jq -r '.owner // empty' "$command_path")"
+              [[ -n "$requested_owner" ]] || { echo "owner required"; exit 1; }
+              [[ -f .automation/lease.active ]] || {
+                write_result "success" '{"released":false,"reason":"lease_absent"}'
+                break
+              }
+              actual_owner="$(jq -r '.owner // empty' .automation/lease.active)"
+              [[ "$actual_owner" == "$requested_owner" ]] || {
+                echo "Lease owner mismatch: actual=$actual_owner requested=$requested_owner"
+                exit 1
+              }
+              rm .automation/lease.active
+              write_result "success" "$(jq -n --arg owner "$requested_owner" '{released:true,owner:$owner}')"
+              ;;
+
+            *)
+              echo "Unsupported op: $op"
+              exit 1
+              ;;
+          esac
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A .automation
+          if git diff --cached --quiet; then
+            echo "No repository result changes."
+            exit 0
+          fi
+          git commit -m "chore(automation): apply command $id"
+          git push origin HEAD:automation-control
