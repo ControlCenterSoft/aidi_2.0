@@ -5,14 +5,14 @@
   "lease_until": null,
   "last_completed_cycle": {
     "owner": "manual-core-recovery",
-    "completed_at": "2026-09-27T14:02:05Z",
-    "issue": 19,
-    "pull_request": 20,
-    "main_sha": "237ad9e71ba1561404c6dee1b253c3fc4355ca87",
+    "completed_at": "2026-09-28T18:05:16Z",
+    "issue": 27,
+    "pull_request": 32,
+    "main_sha": "309e865306eebbfeb826d73a0e72d753f724c865",
     "ci": {
-      "pull_request_run": 36324199330,
-      "main_push_run": 36324280025,
-      "development_push_run": 36324369697
+      "pull_request_run": 36462330282,
+      "main_push_run": 36462466474,
+      "development_push_run": 36462619568
     }
   },
   "note": "GitHub-only scheduler lease. Not part of product source or local AIDI runtime."
