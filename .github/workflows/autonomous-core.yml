@@ -3,7 +3,7 @@ name: AIDI Autonomous Core
 on:
   workflow_dispatch:
   schedule:
-    - cron: "10 * * * *"
+    - cron: "5,15,25,35,45,55 * * * *"
 
 permissions:
   actions: write
@@ -21,7 +21,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GITHUB_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
-      LEASE_OWNER: "core-:10"
+      LEASE_OWNER: "core-${{ github.run_id }}"
       COPILOT_VERSION: "1.0.88"
 
     steps:
@@ -37,53 +37,66 @@ jobs:
         run: |
           set -euo pipefail
 
-          lock_endpoint="repos/$REPO/contents/.automation/lock.json?ref=automation-control"
-          lock_json="$(gh api "$lock_endpoint")"
-          lock_sha="$(jq -r '.sha' <<<"$lock_json")"
-          lock_content="$(jq -r '.content' <<<"$lock_json" | base64 -d)"
-          state="$(jq -r '.state' <<<"$lock_content")"
-          lease_until="$(jq -r '.lease_until // empty' <<<"$lock_content")"
+          lease_endpoint="repos/$REPO/contents/.automation/lease.active?ref=automation-control"
           now_epoch="$(date -u +%s)"
 
           active_previous_work() {
             local prs runs
-            prs="$(gh pr list --repo "$REPO" --state open --limit 100               --json headRefName,baseRefName |               jq '[.[] | select((.headRefName | startswith("automation/")) or .headRefName == "development")] | length')"
-            runs="$(gh run list --repo "$REPO" --limit 100               --json databaseId,status |               jq --argjson current "$GITHUB_RUN_ID"                 '[.[] | select((.status == "queued" or .status == "in_progress") and .databaseId != $current)] | length')"
+            prs="$(gh pr list --repo "$REPO" --state open --limit 100 \
+              --json headRefName,baseRefName | \
+              jq '[.[] | select((.headRefName | startswith("automation/")) or .headRefName == "development")] | length')"
+            runs="$(gh run list --repo "$REPO" --limit 100 \
+              --json databaseId,status | \
+              jq --argjson current "$GITHUB_RUN_ID" \
+                '[.[] | select((.status == "queued" or .status == "in_progress") and .databaseId != $current)] | length')"
             test "$prs" -gt 0 || test "$runs" -gt 0
           }
 
-          update_lock() {
-            local source_json="$1"
-            local expected_sha="$2"
-            local message="$3"
-            local encoded
-            encoded="$(printf '%s\n' "$source_json" | base64 -w0)"
-            gh api --method PUT "repos/$REPO/contents/.automation/lock.json"               -f message="$message"               -f content="$encoded"               -f sha="$expected_sha"               -f branch="automation-control" >/dev/null
-          }
+          # Existence of lease.active is the mutex. If it is stale and there is
+          # no matching external work, remove it by exact blob SHA.
+          if lease_json="$(gh api "$lease_endpoint" 2>/dev/null)"; then
+            lease_sha="$(jq -r '.sha' <<<"$lease_json")"
+            lease_content="$(jq -r '.content' <<<"$lease_json" | base64 -d)"
+            lease_until="$(jq -r '.lease_until // empty' <<<"$lease_content")"
 
-          if [[ "$state" == "active" && -n "$lease_until" ]]; then
-            lease_epoch="$(date -u -d "$lease_until" +%s)"
+            if [[ -n "$lease_until" ]]; then
+              lease_epoch="$(date -u -d "$lease_until" +%s)"
+            else
+              lease_epoch=0
+            fi
+
             if (( lease_epoch > now_epoch )); then
               echo "acquired=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
 
             if active_previous_work; then
-              extended="$(jq --arg until "$(date -u -d '+45 minutes' +%Y-%m-%dT%H:%M:%SZ)"                 '.lease_until=$until' <<<"$lock_content")"
-              if ! update_lock "$extended" "$lock_sha" "chore(automation): extend active lease"; then
-                echo "acquired=false" >> "$GITHUB_OUTPUT"
-                exit 0
-              fi
+              echo "Expired lease retained because previous GitHub work is still active."
               echo "acquired=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
+
+            gh api --method DELETE "repos/$REPO/contents/.automation/lease.active" \
+              -f message="chore(automation): remove stale lease" \
+              -f sha="$lease_sha" \
+              -f branch="automation-control" >/dev/null
           fi
 
-          acquired="$(jq             --arg owner "$LEASE_OWNER"             --arg started "$(date -u +%Y-%m-%dT%H:%M:%SZ)"             --arg until "$(date -u -d '+45 minutes' +%Y-%m-%dT%H:%M:%SZ)"             '.state="active" | .owner=$owner | .started_at=$started | .lease_until=$until'             <<<"$lock_content")"
+          lease_content="$(jq -n \
+            --arg owner "$LEASE_OWNER" \
+            --arg started "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg until "$(date -u -d '+45 minutes' +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg role "AIDI Autonomous Core" \
+            '{owner:$owner,started_at:$started,lease_until:$until,task_role:$role}')"
+          encoded="$(printf '%s\n' "$lease_content" | base64 -w0)"
 
-          if update_lock "$acquired" "$lock_sha" "chore(automation): acquire $LEASE_OWNER lease"; then
+          if gh api --method PUT "repos/$REPO/contents/.automation/lease.active" \
+            -f message="chore(automation): acquire $LEASE_OWNER lease" \
+            -f content="$encoded" \
+            -f branch="automation-control" >/dev/null 2>&1; then
             echo "acquired=true" >> "$GITHUB_OUTPUT"
           else
+            # Normal create-file contention: another writer won the mutex.
             echo "acquired=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -391,32 +404,37 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          lock_json="$(gh api "repos/$REPO/contents/.automation/lock.json?ref=automation-control")"
-          lock_sha="$(jq -r '.sha' <<<"$lock_json")"
-          lock_content="$(jq -r '.content' <<<"$lock_json" | base64 -d)"
-          owner="$(jq -r '.owner // empty' <<<"$lock_content")"
+
+          if ! lease_json="$(gh api "repos/$REPO/contents/.automation/lease.active?ref=automation-control" 2>/dev/null)"; then
+            exit 0
+          fi
+          lease_sha="$(jq -r '.sha' <<<"$lease_json")"
+          lease_content="$(jq -r '.content' <<<"$lease_json" | base64 -d)"
+          owner="$(jq -r '.owner // empty' <<<"$lease_content")"
           [[ "$owner" == "$LEASE_OWNER" ]] || exit 0
 
+          # Completion evidence is append-only; the mutex itself is deleted.
           if [[ "${{ job.status }}" == "success" && -n "${{ steps.devci.outputs.run_id }}" ]]; then
-            released="$(jq               --arg completed "$(date -u +%Y-%m-%dT%H:%M:%SZ)"               --argjson issue "${{ steps.plan.outputs.issue || '0' }}"               --argjson pr "${{ steps.pr.outputs.number || '0' }}"               --arg main_sha "${{ steps.merge.outputs.main_sha }}"               --argjson pr_ci "${{ steps.ci.outputs.run_id || '0' }}"               --argjson main_ci "${{ steps.mainci.outputs.run_id || '0' }}"               --argjson dev_ci "${{ steps.devci.outputs.run_id || '0' }}"               '.state="idle"
-               | .owner=null
-               | .started_at=null
-               | .lease_until=null
-               | .last_completed_cycle={
-                   owner:"core-:10",
-                   completed_at:$completed,
-                   issue:$issue,
-                   pull_request:$pr,
-                   main_sha:$main_sha,
-                   ci:{
-                     pull_request_run:$pr_ci,
-                     main_push_run:$main_ci,
-                     development_push_run:$dev_ci
-                   }
-                 }' <<<"$lock_content")"
-          else
-            released="$(jq '.state="idle" | .owner=null | .started_at=null | .lease_until=null' <<<"$lock_content")"
+            completed="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            history_path=".automation/history/${GITHUB_RUN_ID}.json"
+            history="$(jq -n \
+              --arg owner "$LEASE_OWNER" \
+              --arg completed "$completed" \
+              --argjson issue "${{ steps.plan.outputs.issue || '0' }}" \
+              --argjson pr "${{ steps.pr.outputs.number || '0' }}" \
+              --arg main_sha "${{ steps.merge.outputs.main_sha }}" \
+              --argjson pr_ci "${{ steps.ci.outputs.run_id || '0' }}" \
+              --argjson main_ci "${{ steps.mainci.outputs.run_id || '0' }}" \
+              --argjson dev_ci "${{ steps.devci.outputs.run_id || '0' }}" \
+              '{owner:$owner,completed_at:$completed,issue:$issue,pull_request:$pr,main_sha:$main_sha,ci:{pull_request_run:$pr_ci,main_push_run:$main_ci,development_push_run:$dev_ci}}')"
+            history_encoded="$(printf '%s\n' "$history" | base64 -w0)"
+            gh api --method PUT "repos/$REPO/contents/$history_path" \
+              -f message="chore(automation): record completed cycle $GITHUB_RUN_ID" \
+              -f content="$history_encoded" \
+              -f branch="automation-control" >/dev/null
           fi
 
-          encoded="$(printf '%s\n' "$released" | base64 -w0)"
-          gh api --method PUT "repos/$REPO/contents/.automation/lock.json"             -f message="chore(automation): release $LEASE_OWNER lease"             -f content="$encoded"             -f sha="$lock_sha"             -f branch="automation-control" >/dev/null
+          gh api --method DELETE "repos/$REPO/contents/.automation/lease.active" \
+            -f message="chore(automation): release $LEASE_OWNER lease" \
+            -f sha="$lease_sha" \
+            -f branch="automation-control" >/dev/null
