@@ -18,18 +18,18 @@ It must not read from, write to, synchronize with, or execute against the curren
 
 ## Scheduler ownership
 
-The authoritative cross-cycle lease remains:
+The authoritative cross-cycle mutex is now existence-based:
 
 - branch: `automation-control`;
-- file: `.automation/lock.json`;
-- owner for this cycle: `core-:10`;
-- lease duration: 45 minutes.
+- active lease file: `.automation/lease.active`;
+- lease duration: 45 minutes;
+- legacy `.automation/lock.json` is status/history only and is not used for mutual exclusion.
 
-Every write-cycle reads the lock and blob SHA first. Acquisition and release use the GitHub Contents API with the expected SHA so a competing writer produces a conflict instead of overwriting another lease.
+Acquisition creates `.automation/lease.active` without a prior blob SHA. GitHub permits only one creator for the path, so a competing writer loses safely. Release verifies the owner and deletes the exact current blob. An expired lease is removed only when no matching open automation PR or queued/in-progress GitHub run remains. Completed-cycle evidence is append-only under `.automation/history/`.
 
 ## Cycle
 
-The hourly `:10` cycle performs one bounded Release A Foundation slice:
+The workflow has six safe start opportunities per hour (`:05/:15/:25/:35/:45/:55`). The existence-based lease and previous-work checks ensure that overlapping starts do not create parallel conflicting write cycles. Each successful cycle performs one bounded Release A Foundation slice:
 
 1. acquire the GitHub lease;
 2. verify that no previous automation PR or queued/in-progress CI is active;
@@ -69,3 +69,8 @@ The autonomous workflow declares only the repository permissions it needs:
 - `copilot-requests: write` — use Copilot CLI through the built-in token.
 
 The coding agent is not permitted to perform GitHub writes itself. GitHub writes are performed by deterministic workflow steps after validation.
+
+
+## Scheduled ChatGPT task role
+
+ChatGPT scheduled tasks are the supervisory/control plane for this GitHub-only contour: planning, observation, review, recovery analysis, architecture/evidence audits, and the hourly user report. The authoritative product-write execution path is the GitHub-hosted `AIDI Autonomous Core` workflow. This avoids making connector-side write approvals a dependency of autonomous development.
