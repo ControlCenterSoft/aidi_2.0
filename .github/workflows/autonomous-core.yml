@@ -95,8 +95,12 @@ jobs:
           set -euo pipefail
           prs="$(gh pr list --repo "$REPO" --state open --limit 100             --json headRefName,baseRefName |             jq '[.[] | select((.headRefName | startswith("automation/")) or .headRefName == "development")] | length')"
           runs="$(gh run list --repo "$REPO" --limit 100             --json databaseId,status |             jq --argjson current "$GITHUB_RUN_ID"               '[.[] | select((.status == "queued" or .status == "in_progress") and .databaseId != $current)] | length')"
-          if [[ "$prs" -gt 0 || "$runs" -gt 0 ]]; then
+          orphan_issues="$(gh issue list --repo "$REPO" --state open --limit 100 \
+            --json number,author | \
+            jq '[.[] | select(.author.login == "github-actions[bot]")] | length')"
+          if [[ "$prs" -gt 0 || "$runs" -gt 0 || "$orphan_issues" -gt 0 ]]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Previous GitHub cycle is incomplete: open_prs=$prs active_runs=$runs orphan_automation_issues=$orphan_issues"
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
@@ -207,6 +211,7 @@ jobs:
             npm ci --ignore-scripts --no-audit --no-fund
             npm run build
           )
+          rm -f web/tsconfig.tsbuildinfo
 
           test -n "$(git status --porcelain)"
 
@@ -225,13 +230,19 @@ jobs:
         if: steps.commit.outputs.sha != ''
         id: pr
         shell: bash
+        env:
+          PR_TITLE: ${{ steps.plan.outputs.title }}
         run: |
           set -euo pipefail
-          pr_url="$(gh pr create --repo "$REPO" --draft --base main             --head "${{ steps.branch.outputs.name }}"             --title "${{ steps.plan.outputs.title }}"             --body "Automated GitHub-only Release A slice.
+          issue="${{ steps.plan.outputs.issue }}"
+          if ! pr_url="$(gh pr create --repo "$REPO" --draft --base main             --head "${{ steps.branch.outputs.name }}"             --title "$PR_TITLE"             --body "Automated GitHub-only Release A slice.
 
-          Closes #${{ steps.plan.outputs.issue }}
+          Closes #$issue
 
-          Execution: GitHub-hosted runner only. Full CI is explicitly dispatched and awaited before merge.")"
+          Execution: GitHub-hosted runner only. Full CI is explicitly dispatched and awaited before merge.")"; then
+            gh issue comment "$issue" --repo "$REPO" --body "Automation blocked at PR creation. No new Release A slice should be selected until this issue is recovered or closed." || true
+            exit 1
+          fi
           echo "number=${pr_url##*/}" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch full CI, repair once, and await green
@@ -284,9 +295,10 @@ jobs:
             PYTHONPATH=workers/src python -m unittest discover -s workers/tests -v
             (
               cd web
-                npm ci --ignore-scripts --no-audit --no-fund
+              npm ci --ignore-scripts --no-audit --no-fund
               npm run build
             )
+            rm -f web/tsconfig.tsbuildinfo
 
             test -n "$(git status --porcelain)"
             git add -A
