@@ -100,9 +100,103 @@ jobs:
             echo "acquired=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Recover one existing automation PR
+        id: recover
+        if: steps.lease.outputs.acquired == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          prs="$(gh pr list --repo "$REPO" --state open --limit 100 \
+            --json number,headRefName | \
+            jq '[.[] | select(.headRefName | startswith("automation/"))]')"
+          count="$(jq 'length' <<<"$prs")"
+
+          if [[ "$count" -eq 0 ]]; then
+            echo "recovered=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$count" -ne 1 ]]; then
+            echo "Expected at most one open automation PR, found $count; refusing recovery." >&2
+            echo "recovered=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          pr="$(jq -r '.[0].number' <<<"$prs")"
+          head="$(gh pr view "$pr" --repo "$REPO" --json headRefName --jq '.headRefName')"
+          sha="$(gh pr view "$pr" --repo "$REPO" --json headRefOid --jq '.headRefOid')"
+
+          run_id="$(gh run list --repo "$REPO" --workflow ci.yml --branch "$head" --limit 20 \
+            --json databaseId,headSha,status,conclusion | \
+            jq -r --arg sha "$sha" '.[] | select(.headSha == $sha) | .databaseId' | head -n1)"
+
+          if [[ -z "$run_id" ]]; then
+            gh workflow run ci.yml --repo "$REPO" --ref "$head"
+            for _ in $(seq 1 30); do
+              run_id="$(gh run list --repo "$REPO" --workflow ci.yml --branch "$head" --limit 20 \
+                --json databaseId,headSha | \
+                jq -r --arg sha "$sha" '.[] | select(.headSha == $sha) | .databaseId' | head -n1)"
+              [[ -n "$run_id" ]] && break
+              sleep 4
+            done
+          fi
+          test -n "$run_id"
+          gh run watch "$run_id" --repo "$REPO" --exit-status
+
+          is_draft="$(gh pr view "$pr" --repo "$REPO" --json isDraft --jq '.isDraft')"
+          if [[ "$is_draft" == "true" ]]; then
+            gh pr ready "$pr" --repo "$REPO"
+          fi
+
+          mergeable=""
+          for _ in $(seq 1 20); do
+            mergeable="$(gh pr view "$pr" --repo "$REPO" --json mergeable --jq '.mergeable')"
+            [[ "$mergeable" == "MERGEABLE" ]] && break
+            [[ "$mergeable" == "CONFLICTING" ]] && break
+            sleep 3
+          done
+          [[ "$mergeable" == "MERGEABLE" ]]
+
+          gh pr merge "$pr" --repo "$REPO" --merge --delete-branch
+          git fetch origin main development
+          main_sha="$(git rev-parse origin/main)"
+
+          gh workflow run ci.yml --repo "$REPO" --ref main
+          main_run=""
+          for _ in $(seq 1 30); do
+            main_run="$(gh run list --repo "$REPO" --workflow ci.yml --branch main --limit 20 \
+              --json databaseId,headSha | \
+              jq -r --arg sha "$main_sha" '.[] | select(.headSha == $sha) | .databaseId' | head -n1)"
+            [[ -n "$main_run" ]] && break
+            sleep 4
+          done
+          test -n "$main_run"
+          gh run watch "$main_run" --repo "$REPO" --exit-status
+
+          git fetch origin main development
+          git merge-base --is-ancestor origin/development origin/main
+          git push origin "refs/remotes/origin/main:refs/heads/development"
+
+          gh workflow run ci.yml --repo "$REPO" --ref development
+          dev_run=""
+          for _ in $(seq 1 30); do
+            dev_run="$(gh run list --repo "$REPO" --workflow ci.yml --branch development --limit 20 \
+              --json databaseId,headSha | \
+              jq -r --arg sha "$main_sha" '.[] | select(.headSha == $sha) | .databaseId' | head -n1)"
+            [[ -n "$dev_run" ]] && break
+            sleep 4
+          done
+          test -n "$dev_run"
+          gh run watch "$dev_run" --repo "$REPO" --exit-status
+
+          echo "recovered=true" >> "$GITHUB_OUTPUT"
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+          echo "main_sha=$main_sha" >> "$GITHUB_OUTPUT"
+
       - name: Verify previous GitHub cycle is complete
         id: previous
-        if: steps.lease.outputs.acquired == 'true'
+        if: steps.lease.outputs.acquired == 'true' && steps.recover.outputs.recovered != 'true'
         shell: bash
         run: |
           set -euo pipefail
