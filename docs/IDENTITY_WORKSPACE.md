@@ -101,6 +101,40 @@ Concrete credential issuance/rotation, persistence, Node Agent/CRM adapter
 wiring and any transport binding are out of scope for this slice and remain
 later Release A/B work.
 
+## Local admin bootstrap and break-glass identity
+
+Per SPEC §3.1 ("После clean install создаётся local admin/admin. Система
+остаётся UNINITIALIZED до обязательной смены пароля при первом входе" /
+"Local administrative identity сохраняется как break-glass даже при
+использовании внешнего IdP"), `internal/identity` also defines the mandatory
+local administrative identity contract, matching AC-INST-002, AC-ID-001 and
+AC-ID-004:
+
+- `LocalAdminAccountState` — `UNINITIALIZED` (the post-install bootstrap
+  "admin/admin" state) and `ACTIVE` (reached only after a proven
+  credential-change event). `ValidateLocalAdminTransition` permits only the
+  one-way transition `UNINITIALIZED → ACTIVE`; `ACTIVE → UNINITIALIZED` and
+  any self-loop are rejected — the transition is non-reversible through this
+  contract.
+- `LocalAdminAccount` — `UserID`, `State`, `CredentialRevision` (a monotonic
+  marker for "password changed"). A freshly constructed (zero-value)
+  account is `UNINITIALIZED` via `EffectiveState`. `Validate()` rejects an
+  `ACTIVE` account with `CredentialRevision < 1`, i.e. an account that
+  claims to be `ACTIVE` while still carrying no recorded credential change
+  (still "admin/admin"-equivalent).
+- `RequireInitialized` returns `ErrLocalAdminNotInitialized` when normal
+  operation is attempted while `State == UNINITIALIZED`, encoding "штатная
+  эксплуатация до смены password невозможна" (AC-INST-002).
+- `BreakGlassEligible(account, externalIdPHealthy)` returns true for a
+  valid, `ACTIVE` local admin account regardless of `externalIdPHealthy` —
+  Local Identity validity never depends on external IdP state (AC-ID-001,
+  AC-ID-004).
+
+No password hashing/crypto, persistence, HTTP/API surface or external IdP
+wiring is introduced by this contract; issuance of the actual bootstrap
+credential, its storage and the first-login password-change flow remain
+later Release A/B work.
+
 ## Evidence
 
 The package tests cover:
@@ -120,6 +154,19 @@ The package tests cover:
 - `ServiceIdentity.Validate()` for a well-formed identity and every
   rejection case (invalid id, unknown kind, zero scopes, duplicate scopes,
   wildcard scope, invalid credential lifetime).
+- every legal/illegal `LocalAdminAccountState` transition, in particular
+  that only `UNINITIALIZED → ACTIVE` is legal and that `ACTIVE →
+  UNINITIALIZED` and both self-loops are rejected (AC-INST-002);
+- `LocalAdminAccount.Validate()` for a freshly constructed (zero-value,
+  `UNINITIALIZED`) account, a valid `ACTIVE` account, and rejection of an
+  `ACTIVE` account with no recorded credential change or a negative
+  `CredentialRevision`;
+- `RequireInitialized` rejecting an `UNINITIALIZED` account and accepting
+  a properly initialized `ACTIVE` account (AC-INST-002);
+- `BreakGlassEligible` returning true for a valid `ACTIVE` local admin
+  account for both `externalIdPHealthy = true` and `false`, and returning
+  false for an `UNINITIALIZED` or otherwise invalid account (AC-ID-001,
+  AC-ID-004).
 
 This package has no dependency on `net/http`, `database/sql`, NATS,
 Temporal, or any external identity provider — pure domain logic only,
