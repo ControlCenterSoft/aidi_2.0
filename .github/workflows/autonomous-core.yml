@@ -432,19 +432,33 @@ jobs:
         run: |
           set -euo pipefail
           pr="${{ steps.pr.outputs.number }}"
+          ci_run="${{ steps.ci.outputs.run_id }}"
           gh pr ready "$pr" --repo "$REPO"
 
-          state=""
+          # The authoritative gate for this native cycle is the exact-head-SHA
+          # workflow_dispatch CI that was explicitly awaited above. A duplicate
+          # pull_request run created by GITHUB_TOKEN can remain action_required
+          # and make mergeStateStatus=UNSTABLE even when the exact-SHA CI is green.
+          ci_conclusion="$(gh run view "$ci_run" --repo "$REPO" --json conclusion --jq '.conclusion')"
+          [[ "$ci_conclusion" == "success" ]] || {
+            echo "Authoritative exact-SHA CI is not green: $ci_conclusion" >&2
+            exit 1
+          }
+
+          mergeable=""
           for _ in $(seq 1 20); do
-            state="$(gh pr view "$pr" --repo "$REPO" --json mergeStateStatus --jq '.mergeStateStatus')"
-            [[ "$state" == "CLEAN" ]] && break
-            if [[ "$state" == "DIRTY" || "$state" == "BLOCKED" || "$state" == "UNSTABLE" ]]; then
-              echo "PR is not cleanly mergeable: $state" >&2
+            mergeable="$(gh pr view "$pr" --repo "$REPO" --json mergeable --jq '.mergeable')"
+            [[ "$mergeable" == "MERGEABLE" ]] && break
+            [[ "$mergeable" == "CONFLICTING" ]] && {
+              echo "PR has merge conflicts." >&2
               exit 1
-            fi
+            }
             sleep 3
           done
-          [[ "$state" == "CLEAN" ]]
+          [[ "$mergeable" == "MERGEABLE" ]] || {
+            echo "PR mergeability did not become MERGEABLE: $mergeable" >&2
+            exit 1
+          }
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Merge green PR
