@@ -38,10 +38,47 @@
     }
   ],
   "labels": {
-    "type": ["feature","infra","security","test","migration","api","observability","installer","workflow","refactor","tooling"],
-    "area": ["build","domain","persistence","events","workflow","policy","toolbroker","node-agent","pki","lease","installer","telemetry","api","recovery","testing"],
-    "priority": ["P0","P1"],
-    "risk": ["concurrency","security","state","migration","infrastructure"]
+    "type": [
+      "feature",
+      "infra",
+      "security",
+      "test",
+      "migration",
+      "api",
+      "observability",
+      "installer",
+      "workflow",
+      "refactor",
+      "tooling"
+    ],
+    "area": [
+      "build",
+      "domain",
+      "persistence",
+      "events",
+      "workflow",
+      "policy",
+      "toolbroker",
+      "node-agent",
+      "pki",
+      "lease",
+      "installer",
+      "telemetry",
+      "api",
+      "recovery",
+      "testing"
+    ],
+    "priority": [
+      "P0",
+      "P1"
+    ],
+    "risk": [
+      "concurrency",
+      "security",
+      "state",
+      "migration",
+      "infrastructure"
+    ]
   },
   "automation": {
     "auto_ready": "Move BLOCKED -> READY when all hard_dependencies are DONE.",
@@ -49,8 +86,22 @@
     "done_guard": "DONE requires tests/review/evidence according to issue definition.",
     "gate_guard": "Release A cannot close until all 15 gate issues are DONE/PASS."
   },
-  "initial_parallel_queue": ["A1-001","A2-001","A2-005","A3-005","A5-001","A5-004","A6-001","A8-001","A9-001"],
+  "initial_parallel_queue": [
+    "A1-001",
+    "A2-001",
+    "A2-005",
+    "A3-005",
+    "A5-001",
+    "A5-004",
+    "A6-001",
+    "A8-001",
+    "A9-001"
+  ],
   "source_sha256": "91f720101294c36b8243cbead1c064d67f8d27f33dd52386f256a9102c8393aa",
   "source_artifact": "AIDI-2.0.0-Current-Project-Import-Bundle-20260925.zip::release_a_tracker_package/aidi-release-a-gitea-manifest.json",
-  "shards": ["core-a0-a3","durable-a4-a7","install-a8-a10","recovery-a11-a12","gates"]
+  "execution_index": {
+    "path": ".automation/backlog/release-a/cards.tsv",
+    "sha256": "eaa6b5d368142d886300b72b85e594188fe88551b19fa0b49ce8cc6b1c971f29",
+    "hard_dependency_edges": 263
+  }
 }
