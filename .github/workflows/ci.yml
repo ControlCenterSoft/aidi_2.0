@@ -50,6 +50,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Validate approved Release A backlog graph
+        run: python .github/scripts/release_a_backlog.py validate
       - name: Compile
         run: python -m compileall -q workers/src workers/tests
       - name: Worker smoke test
