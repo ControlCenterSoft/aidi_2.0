@@ -163,6 +163,13 @@ jobs:
           done
           [[ "$mergeable" == "MERGEABLE" ]]
 
+          review_decision="$(gh pr view "$pr" --repo "$REPO" --json reviewDecision --jq '.reviewDecision // ""')"
+          if [[ "$review_decision" != "APPROVED" ]]; then
+            echo "PR #$pr is not approved (reviewDecision=$review_decision); leaving it for Review Gate."
+            echo "recovered=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           gh pr merge "$pr" --repo "$REPO" --merge --delete-branch
           git fetch origin main development
           main_sha="$(git rev-parse origin/main)"
@@ -195,6 +202,14 @@ jobs:
           test -n "$dev_run"
           gh run watch "$dev_run" --repo "$REPO" --exit-status
 
+          linked_issue="$(gh pr view "$pr" --repo "$REPO" --json body --jq '.body' | grep -oE 'Closes #[0-9]+' | head -n1 | grep -oE '[0-9]+' || true)"
+          if [[ -n "$linked_issue" ]]; then
+            issue_state="$(gh issue view "$linked_issue" --repo "$REPO" --json state --jq '.state')"
+            if [[ "$issue_state" == "OPEN" ]]; then
+              gh issue close "$linked_issue" --repo "$REPO" --reason completed
+            fi
+          fi
+
           echo "recovered=true" >> "$GITHUB_OUTPUT"
           echo "pr=$pr" >> "$GITHUB_OUTPUT"
           echo "main_sha=$main_sha" >> "$GITHUB_OUTPUT"
@@ -207,14 +222,22 @@ jobs:
           set -euo pipefail
           prs="$(gh pr list --repo "$REPO" --state open --limit 100             --json headRefName,baseRefName |             jq '[.[] | select((.headRefName | startswith("automation/")) or .headRefName == "development")] | length')"
           runs="$(gh run list --repo "$REPO" --limit 100             --json databaseId,status |             jq --argjson current "$GITHUB_RUN_ID"               '[.[] | select((.status == "queued" or .status == "in_progress") and .databaseId != $current)] | length')"
-          orphan_issues="$(gh issue list --repo "$REPO" --state open --limit 100 \
-            --json number,author | \
-            jq '[.[] | select(.author.login == "github-actions[bot]")] | length')"
-          if [[ "$prs" -gt 0 || "$runs" -gt 0 || "$orphan_issues" -gt 0 ]]; then
+          orphan_json="$(gh issue list --repo "$REPO" --state open --limit 100 \
+            --json number,author,createdAt | \
+            jq '[.[] | select(.author.login == "github-actions[bot]")] | sort_by(.createdAt)')"
+          orphan_count="$(jq 'length' <<<"$orphan_json")"
+          orphan_issue="$(jq -r '.[0].number // empty' <<<"$orphan_json")"
+
+          if [[ "$prs" -gt 0 || "$runs" -gt 0 ]]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Previous GitHub cycle is incomplete: open_prs=$prs active_runs=$runs orphan_automation_issues=$orphan_issues"
+            echo "Previous GitHub cycle is incomplete: open_prs=$prs active_runs=$runs orphan_automation_issues=$orphan_count"
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "orphan_issue=$orphan_issue" >> "$GITHUB_OUTPUT"
+            echo "orphan_count=$orphan_count" >> "$GITHUB_OUTPUT"
+            if [[ "$orphan_count" -gt 0 ]]; then
+              echo "Reusing oldest unresolved automation Issue #$orphan_issue; no new slice will be selected."
+            fi
           fi
 
       - name: Install pinned Copilot CLI
@@ -227,6 +250,33 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          orphan_issue="${{ steps.previous.outputs.orphan_issue }}"
+          if [[ -n "$orphan_issue" ]]; then
+            title="$(gh issue view "$orphan_issue" --repo "$REPO" --json title --jq '.title')"
+            gh issue view "$orphan_issue" --repo "$REPO" --json body --jq '.body' > /tmp/aidi-plan.md
+
+            linked_pr="$(gh pr list --repo "$REPO" --state merged \
+              --search "Closes #$orphan_issue in:body" --limit 20 \
+              --json number,mergedAt --jq 'sort_by(.mergedAt) | last | .number // empty')"
+
+            if [[ -n "$linked_pr" ]]; then
+              gh pr view "$linked_pr" --repo "$REPO" --json reviews \
+                --jq '[.reviews[]? | select(.state == "CHANGES_REQUESTED") | .body] | join("\n\n---\n\n")' \
+                > /tmp/aidi-review-findings.md
+              if [[ -s /tmp/aidi-review-findings.md ]]; then
+                {
+                  printf '\n\n## Mandatory recovery findings from merged PR #%s\n\n' "$linked_pr"
+                  cat /tmp/aidi-review-findings.md
+                } >> /tmp/aidi-plan.md
+              fi
+            fi
+
+            echo "issue=$orphan_issue" >> "$GITHUB_OUTPUT"
+            echo "title=$title" >> "$GITHUB_OUTPUT"
+            echo "Recovery mode: reusing Issue #$orphan_issue instead of creating a new slice."
+            exit 0
+          fi
 
           cat > /tmp/aidi-selector-prompt.txt <<'PROMPT'
           Work only in this checked-out repository. Read docs/SPEC.md, docs/ROADMAP.md,
@@ -445,6 +495,13 @@ jobs:
             exit 1
           }
 
+          review_decision="$(gh pr view "$pr" --repo "$REPO" --json reviewDecision --jq '.reviewDecision // ""')"
+          if [[ "$review_decision" != "APPROVED" ]]; then
+            echo "PR #$pr is not approved (reviewDecision=$review_decision); leaving it for Review Gate."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           mergeable=""
           for _ in $(seq 1 20); do
             mergeable="$(gh pr view "$pr" --repo "$REPO" --json mergeable --jq '.mergeable')"
@@ -511,6 +568,14 @@ jobs:
           test -n "$run_id"
           gh run watch "$run_id" --repo "$REPO" --exit-status
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+          issue="${{ steps.plan.outputs.issue }}"
+          if [[ -n "$issue" ]]; then
+            issue_state="$(gh issue view "$issue" --repo "$REPO" --json state --jq '.state')"
+            if [[ "$issue_state" == "OPEN" ]]; then
+              gh issue close "$issue" --repo "$REPO" --reason completed
+            fi
+          fi
 
       - name: Release lease
         if: always() && steps.lease.outputs.acquired == 'true'
