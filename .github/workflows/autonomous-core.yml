@@ -46,15 +46,15 @@ jobs:
           now_epoch="$(date -u +%s)"
 
           active_previous_work() {
-            local prs runs
-            prs="$(gh pr list --repo "$REPO" --state open --limit 100 \
-              --json headRefName,baseRefName | \
-              jq '[.[] | select((.headRefName | startswith("automation/")) or .headRefName == "development")] | length')"
+            local runs
+            # An open PR is durable recoverable state, not proof that a process
+            # still owns an expired lease. Retain a stale lease only while
+            # another GitHub Actions run is actually queued/in_progress.
             runs="$(gh run list --repo "$REPO" --limit 100 \
               --json databaseId,status | \
               jq --argjson current "$GITHUB_RUN_ID" \
                 '[.[] | select((.status == "queued" or .status == "in_progress") and .databaseId != $current)] | length')"
-            test "$prs" -gt 0 || test "$runs" -gt 0
+            test "$runs" -gt 0
           }
 
           # Existence of lease.active is the mutex. If it is stale and there is
