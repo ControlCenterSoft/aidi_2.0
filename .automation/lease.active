@@ -1,6 +1,0 @@
-{
-  "owner": "controller-workflow-review-repair-20260929T0725Z",
-  "started_at": "2026-09-29T07:25:00Z",
-  "lease_until": "2026-09-29T07:35:00Z",
-  "task_role": "AIDI Controller orchestration repair"
-}
