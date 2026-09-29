@@ -1,0 +1,6 @@
+{
+  "owner": "controller-repair-20260929T0505Z",
+  "started_at": "2026-09-29T05:05:00Z",
+  "lease_until": "2026-09-29T05:25:00Z",
+  "task_role": "AIDI Controller orchestration repair"
+}
