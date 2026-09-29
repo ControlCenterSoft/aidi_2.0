@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/ControlCenterSoft/aidi_2.0/internal/apiratelimit"
+	"github.com/ControlCenterSoft/aidi_2.0/internal/authorization"
 	"github.com/ControlCenterSoft/aidi_2.0/internal/canonical"
 )
 
@@ -35,6 +36,10 @@ const (
 	CodeRateLimited Code = "RATE_LIMITED"
 	// CodeInternal indicates an unexpected server-side failure.
 	CodeInternal Code = "INTERNAL"
+	// CodeForbidden indicates the caller is authenticated but not
+	// authorized to perform the requested operation (a denied
+	// authorization.Decision).
+	CodeForbidden Code = "FORBIDDEN"
 )
 
 // knownCodes is the closed set of Code values accepted by Validate.
@@ -44,6 +49,7 @@ var knownCodes = map[Code]struct{}{
 	CodeNotFound:    {},
 	CodeRateLimited: {},
 	CodeInternal:    {},
+	CodeForbidden:   {},
 }
 
 // ErrInvalidError is returned (wrapped) by Validate when an Error value does
@@ -162,5 +168,33 @@ func FromRateLimitDecision(decision apiratelimit.Decision, correlationID string)
 		return Error{}, err
 	}
 	e.Retryable = decision.RetryAfter > 0
+	return e, nil
+}
+
+// FromAuthorizationDecision maps a denied authorization.Decision onto the
+// Public API structured error envelope: Code = CodeForbidden, Retryable is
+// always false (an authorization denial cannot be resolved by retrying the
+// same request unchanged), and Details["reason"] carries the decision's
+// Reason — following the FromRateLimitDecision mapping pattern exactly. An
+// Allowed decision has nothing to map into an error and is rejected.
+func FromAuthorizationDecision(decision authorization.Decision, correlationID string) (Error, error) {
+	if decision.Allowed {
+		return Error{}, fmt.Errorf("%w: allowed decision cannot be mapped to an error", ErrInvalidError)
+	}
+	if err := decision.Validate(); err != nil {
+		return Error{}, fmt.Errorf("%w: %v", ErrInvalidError, err)
+	}
+	e, err := New(
+		CodeForbidden,
+		"not authorized to perform this operation",
+		correlationID,
+		map[string]string{
+			"reason": decision.Reason,
+		},
+	)
+	if err != nil {
+		return Error{}, err
+	}
+	e.Retryable = false
 	return e, nil
 }

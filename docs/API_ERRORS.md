@@ -21,7 +21,7 @@ type Error struct {
 ```
 
 - `Code` — one of the closed set `VALIDATION`, `CONFLICT`, `NOT_FOUND`,
-  `RATE_LIMITED`, `INTERNAL`. Any other value is rejected.
+  `RATE_LIMITED`, `INTERNAL`, `FORBIDDEN`. Any other value is rejected.
 - `Message` — human-readable description of the failure.
 - `CorrelationID` — **mandatory**. Ties the error back to the originating
   command/query (SPEC §13.1 "correlation" requirement). An `Error` without a
@@ -52,6 +52,13 @@ slices.
   unchanged in `Details` (`expected_revision`/`actual_revision`), and always
   sets `Retryable = false` — consistent with `docs/CANONICAL_STATE.md`'s
   reconcile-not-retry rule for stale writers.
+- **Authorization denials map deterministically and are never retryable.**
+  `FromAuthorizationDecision` converts a denied `authorization.Decision`
+  (see `docs/AUTHORIZATION.md`) into an `apierror.Error` with
+  `Code = FORBIDDEN`, carries the decision's `Reason` unchanged in
+  `Details["reason"]`, and always sets `Retryable = false` — an
+  authorization denial cannot be resolved by blindly retrying the same
+  request.
 
 ## Scope boundary
 
@@ -74,6 +81,10 @@ The package tests (`internal/apierror/error_test.go`) cover:
 - the `RevisionConflictError → apierror.Error` mapping: `Code = CONFLICT`,
   unchanged `Expected`/`Actual` revisions in `Details`, `Retryable = false`,
   and rejection of a `nil` conflict.
+- the `FORBIDDEN` code and the `authorization.Decision → apierror.Error`
+  mapping (`FromAuthorizationDecision`): `Code = FORBIDDEN`,
+  `Retryable = false`, `Details["reason"]` preserved from the decision, and
+  rejection of an `Allowed == true` decision.
 
 `go test ./internal/apierror/... -race`, `gofmt -l internal/apierror`, and
 `go vet ./internal/apierror/...` all pass clean.
