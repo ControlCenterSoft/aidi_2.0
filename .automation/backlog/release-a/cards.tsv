@@ -1,0 +1,102 @@
+source_sha256	91f720101294c36b8243cbead1c064d67f8d27f33dd52386f256a9102c8393aa
+A0-001	I		[A0-001] Create canonical Gitea repository
+A0-002	I	A0-001	[A0-002] Create monorepo structure
+A0-003	I	A0-002	[A0-003] Initialize Go workspace/modules
+A0-004	I	A0-003	[A0-004] Reproducible binary build
+A0-005	I	A0-003	[A0-005] Foundation code-quality gates
+A0-006	I	A0-004	[A0-006] Build/version provenance metadata
+A1-001	I	A0-003	[A1-001] Canonical identifier model
+A1-002	I	A1-001	[A1-002] Object revision model
+A1-003	I	A1-001	[A1-003] Canonical state definitions
+A1-004	I	A1-003	[A1-004] Separate state and reason
+A1-005	I	A1-003,A1-004	[A1-005] State transition validator
+A1-006	I	A1-002,A1-005	[A1-006] Domain invariant framework
+A2-001	I	A0-003	[A2-001] PostgreSQL 16 foundation profile
+A2-002	I	A1-001,A1-002,A1-003,A2-001	[A2-002] Canonical schema v1
+A2-003	I	A2-002	[A2-003] Data-access/domain repository boundary
+A2-004	I	A2-003,A1-002	[A2-004] Optimistic concurrency enforcement
+A2-005	I	A2-001	[A2-005] Migration framework
+A2-006	I	A2-005	[A2-006] Schema compatibility metadata
+A3-001	I	A1-001,A1-002,A2-002	[A3-001] Append-only Event Journal
+A3-002	I	A2-003,A3-001	[A3-002] Atomic canonical state + Event
+A3-003	I	A3-002	[A3-003] Transactional Outbox
+A3-004	I	A2-003	[A3-004] Inbox / idempotency
+A3-005	I	A0-003	[A3-005] NATS JetStream foundation
+A3-006	I	A3-001,A3-003,A3-004,A3-005	[A3-006] Publisher/consumer contracts
+A4-001	I	A2-001	[A4-001] Temporal foundation deployment
+A4-002	I	A1-001,A4-001	[A4-002] AIDI Workflow SDK boundary
+A4-003	I	A3-002,A4-002	[A4-003] Foundation durable workflow
+A4-004	I	A4-003	[A4-004] Workflow restart durability
+A4-005	I	A4-002	[A4-005] External Action / Signal primitive
+A5-001	I	A1-001,A1-002	[A5-001] Foundation Policy domain model
+A5-002	I	A5-001	[A5-002] ALLOW/DENY policy evaluation
+A5-003	I	A2-003,A5-001	[A5-003] Policy revision/versioning
+A5-004	I	A1-001	[A5-004] Tool Registry
+A5-005	I	A5-002,A5-004	[A5-005] Authorization → Policy → Execution pipeline
+A5-006	I	A5-005	[A5-006] Foundation test tools
+A6-001	I	A0-003	[A6-001] Node Agent service
+A6-002	I	A6-001	[A6-002] Hardware/OS inventory
+A6-003	I	A6-001,A3-005	[A6-003] Node heartbeat
+A6-004	I	A1-003,A6-003	[A6-004] Desired/Observed State contract
+A6-005	I	A2-003	[A6-005] One-time enrollment token
+A6-006	I	A6-005,A6-008	[A6-006] Machine Identity
+A6-007	I	A6-006	[A6-007] mTLS Agent channel
+A6-008	I	A2-001	[A6-008] Minimal OpenBao PKI foundation
+A7-001	I	A1-003,A6-004	[A7-001] Node lifecycle
+A7-002	I	A6-002,A6-007,A7-001	[A7-002] Node qualification primitive
+A7-003	I	A2-003	[A7-003] Persisted Lease
+A7-004	I	A7-003	[A7-004] Fencing generation
+A7-005	I	A3-001,A7-003	[A7-005] Lease expiry reconciliation
+A7-006	I	A7-004,A7-005	[A7-006] Stale-owner rejection
+A8-001	I	A0-004	[A8-001] Installer binary
+A8-002	I	A8-001	[A8-002] Preflight checks
+A8-003	I	A1-001,A8-001	[A8-003] Role Manifest framework
+A8-004	I	A2-001,A2-002,A2-003,A2-004,A2-005,A2-006,A3-005,A4-001,A6-008,A8-003,A8-007	[A8-004] Install Foundation services
+A8-005	I	A8-004,A9-006	[A8-005] Installation Health Gate
+A8-006	I	A8-003,A8-004	[A8-006] Offline bundle skeleton
+A8-007	I	A8-001,A8-002	[A8-007] containerd foundation runtime
+A9-001	I	A0-003,A1-001	[A9-001] Unified telemetry schema
+A9-002	I	A9-001	[A9-002] OpenTelemetry Collector
+A9-003	I	A9-002	[A9-003] Prometheus metrics
+A9-004	I	A9-002	[A9-004] Jaeger tracing
+A9-005	I	A9-001	[A9-005] Structured logging
+A9-006	I	A9-003,A9-005	[A9-006] Foundation health aggregation
+A10-001	I	A9-006	[A10-001] Health endpoint
+A10-002	I	A0-006	[A10-002] Version endpoint
+A10-003	I	A6-004,A7-001	[A10-003] Node list/detail endpoint
+A10-004	I	A3-004,A5-005	[A10-004] Foundation Command endpoint
+A10-005	I	A3-001	[A10-005] Event/query endpoint
+A10-006	I	A10-001,A10-002,A10-003,A10-004,A10-005	[A10-006] Admin CLI
+A11-001	I	A1-006,A2-003	[A11-001] State Integrity Checker
+A11-002	I	A7-003,A11-001	[A11-002] Orphan/stale lease detection
+A11-003	I	A3-001	[A11-003] Projection rebuild primitive
+A11-004	I	A3-003,A3-006	[A11-004] NATS outage recovery
+A11-005	I	A4-004	[A11-005] Temporal restart recovery
+A11-006	I	A6-003,A7-005	[A11-006] Node reconnect reconciliation
+A12-001	I		[A12-001] Foundation unit-test baseline
+A12-002	I	A2-001,A2-002,A2-003,A2-004,A2-005,A2-006	[A12-002] PostgreSQL integration suite
+A12-003	I	A3-001,A3-002,A3-003,A3-004,A3-005,A3-006	[A12-003] NATS Outbox/Inbox suite
+A12-004	I	A4-001,A4-002,A4-003,A4-004,A4-005	[A12-004] Temporal durability suite
+A12-005	I	A6-001,A6-002,A6-003,A6-004,A6-005,A6-006,A6-007,A6-008	[A12-005] Node Agent contract suite
+A12-006	I	A7-001,A7-002,A7-003,A7-004,A7-005,A7-006	[A12-006] Lease/fencing race suite
+A12-007	I	A8-001,A8-002,A8-003,A8-004,A8-005,A8-006,A8-007,A9-001,A9-002,A9-003,A9-004,A9-005,A9-006,A10-001,A10-002,A10-003,A10-004,A10-005,A10-006,A11-001,A11-002,A11-003,A11-004,A11-005,A11-006	[A12-007] Clean-install E2E
+A12-008	I	A4-004,A11-005	[A12-008] Control restart E2E
+A12-009	I	A3-003,A3-006,A11-004	[A12-009] Event-bus outage E2E
+A12-010	I	A6-003,A6-004,A7-005,A11-006	[A12-010] Node network-loss E2E
+A12-011	I	A7-004,A7-005,A7-006	[A12-011] Stale-owner E2E
+A12-012	I	A12-001,A12-002,A12-003,A12-004,A12-005,A12-006,A12-007,A12-008,A12-009,A12-010,A12-011	[A12-012] Foundation ПМИ
+RA-GATE-01	G	A0-004,A0-005,A0-006	[RA-GATE-01] BUILD
+RA-GATE-02	G	A2-001,A2-002,A2-003,A2-005,A2-006,A12-002	[RA-GATE-02] DB
+RA-GATE-03	G	A2-004,A12-002	[RA-GATE-03] CONCURRENCY
+RA-GATE-04	G	A3-001,A3-002,A12-003	[RA-GATE-04] EVENTS
+RA-GATE-05	G	A3-003,A11-004,A12-003,A12-009	[RA-GATE-05] OUTBOX
+RA-GATE-06	G	A3-004,A12-003	[RA-GATE-06] IDEMPOTENCY
+RA-GATE-07	G	A4-003,A4-004,A12-004,A12-008	[RA-GATE-07] WORKFLOW
+RA-GATE-08	G	A6-005,A6-006,A6-007,A7-002,A12-005	[RA-GATE-08] NODE
+RA-GATE-09	G	A7-003,A7-004,A7-005,A7-006,A12-006,A12-011	[RA-GATE-09] FENCING
+RA-GATE-10	G	A5-001,A5-002,A5-004,A5-005,A5-006	[RA-GATE-10] POLICY
+RA-GATE-11	G	A9-001,A9-002,A9-003,A9-004,A9-005,A9-006	[RA-GATE-11] OBSERVABILITY
+RA-GATE-12	G	A8-001,A8-002,A8-003,A8-004,A8-005,A8-007,A12-007	[RA-GATE-12] INSTALL
+RA-GATE-13	G	A8-006,A12-007	[RA-GATE-13] OFFLINE
+RA-GATE-14	G	A11-001,A11-002,A11-003,A12-002	[RA-GATE-14] STATE INTEGRITY
+RA-GATE-15	G	A12-012	[RA-GATE-15] ПМИ
