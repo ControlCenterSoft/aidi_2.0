@@ -1,8 +1,0 @@
-{
-  "owner": "chatgpt-review-pr38-20260929T0322Z",
-  "started_at": "2026-09-29T03:22:00Z",
-  "lease_until": "2026-09-29T03:32:00Z",
-  "task_role": "review",
-  "issue": 37,
-  "slice": "PR-38"
-}
