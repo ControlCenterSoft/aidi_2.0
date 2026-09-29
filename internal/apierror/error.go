@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ControlCenterSoft/aidi_2.0/internal/apiratelimit"
 	"github.com/ControlCenterSoft/aidi_2.0/internal/canonical"
 )
 
@@ -132,4 +133,31 @@ func FromRevisionConflict(conflict *canonical.RevisionConflictError, correlation
 			"actual_revision":   fmt.Sprintf("%d", conflict.Actual),
 		},
 	)
+}
+
+// FromRateLimitDecision maps a denied apiratelimit.Decision onto the Public
+// API structured error envelope: Code = CodeRateLimited, Retryable is true
+// only when RetryAfter > 0, and RetryAfter is surfaced via
+// Details["retry_after_ms"] — following the FromRevisionConflict mapping
+// pattern exactly. An Allowed decision has nothing to map into an error and
+// is rejected.
+func FromRateLimitDecision(decision apiratelimit.Decision, correlationID string) (Error, error) {
+	if decision.Allowed {
+		return Error{}, fmt.Errorf("%w: allowed decision cannot be mapped to an error", ErrInvalidError)
+	}
+	e, err := New(
+		CodeRateLimited,
+		"rate limit exceeded",
+		correlationID,
+		map[string]string{
+			"retry_after_ms": fmt.Sprintf("%d", decision.RetryAfter.Milliseconds()),
+			"limit":          fmt.Sprintf("%d", decision.Limit),
+			"remaining":      fmt.Sprintf("%d", decision.Remaining),
+		},
+	)
+	if err != nil {
+		return Error{}, err
+	}
+	e.Retryable = decision.RetryAfter > 0
+	return e, nil
 }

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/ControlCenterSoft/aidi_2.0/internal/apiratelimit"
 	"github.com/ControlCenterSoft/aidi_2.0/internal/canonical"
 )
 
@@ -163,5 +165,67 @@ func TestFromRevisionConflict(t *testing.T) {
 func TestFromRevisionConflict_RejectsNil(t *testing.T) {
 	if _, err := FromRevisionConflict(nil, "corr-1"); !errors.Is(err, ErrInvalidError) {
 		t.Fatalf("expected ErrInvalidError for nil conflict, got %v", err)
+	}
+}
+
+func TestFromRateLimitDecision_MapsDeniedDecision(t *testing.T) {
+	decision := apiratelimit.Decision{
+		Allowed:    false,
+		RetryAfter: 2500 * time.Millisecond,
+		Limit:      5,
+		Remaining:  0,
+	}
+
+	mapped, err := FromRateLimitDecision(decision, "corr-101")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mapped.Code != CodeRateLimited {
+		t.Fatalf("expected CodeRateLimited, got %v", mapped.Code)
+	}
+	if mapped.CorrelationID != "corr-101" {
+		t.Fatalf("expected correlation id to be preserved, got %q", mapped.CorrelationID)
+	}
+	if !mapped.Retryable {
+		t.Fatalf("expected Retryable=true when RetryAfter > 0, got false")
+	}
+	if mapped.Details["retry_after_ms"] != "2500" {
+		t.Fatalf("expected retry_after_ms=2500, got %+v", mapped.Details)
+	}
+	if err := mapped.Validate(); err != nil {
+		t.Fatalf("mapped error failed validation: %v", err)
+	}
+}
+
+func TestFromRateLimitDecision_ZeroRetryAfterIsNotRetryable(t *testing.T) {
+	decision := apiratelimit.Decision{
+		Allowed:    false,
+		RetryAfter: 0,
+		Limit:      5,
+		Remaining:  0,
+	}
+
+	mapped, err := FromRateLimitDecision(decision, "corr-102")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mapped.Retryable {
+		t.Fatalf("expected Retryable=false when RetryAfter == 0, got true")
+	}
+	if mapped.Details["retry_after_ms"] != "0" {
+		t.Fatalf("expected retry_after_ms=0, got %+v", mapped.Details)
+	}
+}
+
+func TestFromRateLimitDecision_RejectsAllowedDecision(t *testing.T) {
+	decision := apiratelimit.Decision{
+		Allowed:    true,
+		RetryAfter: 0,
+		Limit:      5,
+		Remaining:  3,
+	}
+
+	if _, err := FromRateLimitDecision(decision, "corr-103"); !errors.Is(err, ErrInvalidError) {
+		t.Fatalf("expected ErrInvalidError for allowed decision, got %v", err)
 	}
 }
