@@ -1,0 +1,8 @@
+{
+  "owner": "manual-recovery-issue-35",
+  "started_at": "2026-09-29T02:22:00Z",
+  "lease_until": "2026-09-29T03:07:00Z",
+  "task_role": "supervisory-recovery",
+  "issue": 35,
+  "slice": "Service/Workload Identities (SPEC §3.3)"
+}
