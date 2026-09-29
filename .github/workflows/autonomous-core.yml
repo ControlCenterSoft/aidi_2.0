@@ -343,112 +343,77 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # Product work is single-slice. An existing automation PR or another
+          # live GitHub execution must complete before a new canonical card is
+          # selected.
           prs="$(gh pr list --repo "$REPO" --state open --limit 100             --json headRefName,baseRefName |             jq '[.[] | select((.headRefName | startswith("automation/")) or .headRefName == "development")] | length')"
           runs="$(gh run list --repo "$REPO" --limit 100             --json databaseId,status |             jq --argjson current "$GITHUB_RUN_ID"               '[.[] | select((.status == "queued" or .status == "in_progress") and .databaseId != $current)] | length')"
-          orphan_json="$(gh api --paginate "repos/$REPO/issues?state=open&sort=created&direction=asc&per_page=100" | \
-            jq -s '[.[][] | select((has("pull_request") | not) and .user.login == "github-actions[bot]")] | sort_by(.created_at)')"
-          orphan_count="$(jq 'length' <<<"$orphan_json")"
-          orphan_issue="$(jq -r '.[0].number // empty' <<<"$orphan_json")"
 
-          if [[ "$prs" -gt 0 || "$runs" -gt 0 ]]; then
+          # Pre-manifest bot-created Issues are durable legacy recovery state.
+          # Canonical Release A tracker Issues always start with an approved
+          # stable key and are handled by the dependency selector below.
+          legacy_open="$(gh api --paginate "repos/$REPO/issues?state=open&sort=created&direction=asc&per_page=100" |             jq -s '[.[][] | select((has("pull_request") | not) and .user.login == "github-actions[bot]") |               select((.title | test("^\\[(A[0-9]+-[0-9]+|RA-GATE-[0-9]+)\\] ")) | not)] | length')"
+
+          if [[ "$prs" -gt 0 || "$runs" -gt 0 || "$legacy_open" -gt 0 ]]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Previous GitHub cycle is incomplete: open_prs=$prs active_runs=$runs orphan_automation_issues=$orphan_count"
+            echo "Previous GitHub cycle is incomplete: open_prs=$prs active_runs=$runs legacy_open=$legacy_open"
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
-            echo "orphan_issue=$orphan_issue" >> "$GITHUB_OUTPUT"
-            echo "orphan_count=$orphan_count" >> "$GITHUB_OUTPUT"
-            if [[ "$orphan_count" -gt 0 ]]; then
-              echo "Reusing oldest unresolved automation Issue #$orphan_issue; no new slice will be selected."
-            fi
           fi
 
-      - name: Install pinned Copilot CLI
+      - name: Validate approved Release A backlog graph
         if: steps.lease.outputs.acquired == 'true' && steps.previous.outputs.ready == 'true'
-        run: npm install -g "@github/copilot@$COPILOT_VERSION"
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/release_a_backlog.py validate
 
-      - name: Select one READY Release A Foundation slice
+      - name: Select deterministic READY Release A card
         id: plan
         if: steps.lease.outputs.acquired == 'true' && steps.previous.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
 
-          orphan_issue="${{ steps.previous.outputs.orphan_issue }}"
-          if [[ -n "$orphan_issue" ]]; then
-            title="$(gh issue view "$orphan_issue" --repo "$REPO" --json title --jq '.title')"
-            gh issue view "$orphan_issue" --repo "$REPO" --json body --jq '.body' > /tmp/aidi-plan.md
-
-            linked_pr="$(gh pr list --repo "$REPO" --state merged \
-              --search "Closes #$orphan_issue in:body" --limit 20 \
-              --json number,mergedAt --jq 'sort_by(.mergedAt) | last | .number // empty')"
-
-            if [[ -n "$linked_pr" ]]; then
-              gh pr view "$linked_pr" --repo "$REPO" --json reviews \
-                --jq '[.reviews[]? | select(.state == "CHANGES_REQUESTED") | .body] | join("\n\n---\n\n")' \
-                > /tmp/aidi-review-findings.md
-              if [[ -s /tmp/aidi-review-findings.md ]]; then
-                {
-                  printf '\n\n## Mandatory recovery findings from merged PR #%s\n\n' "$linked_pr"
-                  cat /tmp/aidi-review-findings.md
-                } >> /tmp/aidi-plan.md
-              fi
-            fi
-
-            echo "issue=$orphan_issue" >> "$GITHUB_OUTPUT"
-            echo "title=$title" >> "$GITHUB_OUTPUT"
-            echo "Recovery mode: reusing Issue #$orphan_issue instead of creating a new slice."
+          # Import completion is a hard activation gate. Until all 101 approved
+          # cards are present in GitHub, do not create or invent replacement
+          # scope.
+          if [[ ! -f .automation/backlog/release-a/import.complete ]]; then
+            echo "Canonical Release A tracker import is not complete; no product slice may start."
             exit 0
           fi
 
-          cat > /tmp/aidi-selector-prompt.txt <<'PROMPT'
-          Work only in this checked-out repository. Read docs/SPEC.md, docs/ROADMAP.md,
-          docs/FOUNDATION.md and the current source tree. Select exactly one small,
-          dependency-ready Release A Foundation slice that is not already implemented.
-          Priority: core/domain contracts, canonical state, configuration, API boundaries,
-          architecture primitives. Do not modify any file. Do not use external/local AIDI,
-          Forgejo, VMs, runners, queues, databases or state.
+          gh api --paginate "repos/$REPO/issues?state=all&per_page=100" |             jq -s 'add | map(select(has("pull_request") | not))'             > /tmp/release-a-issues.json
 
-          Return concise Markdown:
-          include exactly one top-level "# <issue title>" heading;
-          then Scope, Acceptance criteria, and Evidence expected.
-          The slice must fit one PR and be independently testable.
-          PROMPT
+          selection="$(python .github/scripts/release_a_backlog.py select             --issues /tmp/release-a-issues.json)"
+          ready="$(jq -r '.ready' <<<"$selection")"
 
-          run_selector() {
-            local status title
-            set +e
-            copilot -p "$(cat /tmp/aidi-selector-prompt.txt)"               -s               --allow-tool='read,shell(git log:*),shell(git status),shell(grep:*),shell(find:*)'               --no-ask-user               > /tmp/aidi-plan.raw.md 2> /tmp/aidi-plan.err
-            status=$?
-            set -e
-
-            if [[ "$status" -ne 0 ]]; then
-              echo "Copilot selector exited with status $status" >&2
-              sed -n '1,220p' /tmp/aidi-plan.err >&2
-              return "$status"
+          if [[ "$ready" != "true" ]]; then
+            complete="$(jq -r '.implementation_complete // false' <<<"$selection")"
+            if [[ "$complete" == "true" ]]; then
+              echo "All 86 Release A implementation cards are DONE; product executor is waiting for Release A gates."
+            else
+              echo "No dependency-ready Release A implementation card is available."
             fi
-
-            awk 'found || /^# / { found=1; print }' /tmp/aidi-plan.raw.md > /tmp/aidi-plan.md
-            title="$(sed -n '1s/^# //p' /tmp/aidi-plan.md)"
-            if [[ -z "$title" ]]; then
-              echo "Copilot selector returned no Markdown H1 title." >&2
-              echo "--- selector stdout ---" >&2
-              sed -n '1,220p' /tmp/aidi-plan.raw.md >&2
-              echo "--- selector stderr ---" >&2
-              sed -n '1,220p' /tmp/aidi-plan.err >&2
-              return 2
-            fi
-          }
-
-          if ! run_selector; then
-            echo "Retrying selector once after non-actionable output." >&2
-            run_selector
+            exit 0
           fi
 
-          title="$(sed -n '1s/^# //p' /tmp/aidi-plan.md)"
-          issue_url="$(gh issue create --repo "$REPO" --title "$title" --body-file /tmp/aidi-plan.md)"
-          issue_number="${issue_url##*/}"
-          echo "issue=$issue_number" >> "$GITHUB_OUTPUT"
+          issue="$(jq -r '.issue' <<<"$selection")"
+          key="$(jq -r '.key' <<<"$selection")"
+          title="$(jq -r '.title' <<<"$selection")"
+
+          gh issue view "$issue" --repo "$REPO" --json body --jq '.body' > /tmp/aidi-plan.md
+          test -s /tmp/aidi-plan.md
+
+          echo "issue=$issue" >> "$GITHUB_OUTPUT"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
           echo "title=$title" >> "$GITHUB_OUTPUT"
+          echo "Selected canonical READY card $key as GitHub Issue #$issue."
+
+      - name: Install pinned Copilot CLI
+        if: steps.plan.outputs.issue != ''
+        run: npm install -g "@github/copilot@$COPILOT_VERSION"
 
       - name: Create isolated automation branch
         if: steps.plan.outputs.issue != ''
