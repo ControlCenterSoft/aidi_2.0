@@ -188,6 +188,15 @@ jobs:
           [[ "$mergeable" == "MERGEABLE" ]]
 
           review_decision="$(gh pr view "$pr" --repo "$REPO" --json reviewDecision --jq '.reviewDecision // ""')"
+          if [[ "$review_decision" == "CHANGES_REQUESTED" ]]; then
+            echo "PR #$pr has requested changes; handing it to bounded native review repair."
+            echo "repair_needed=true" >> "$GITHUB_OUTPUT"
+            echo "pr=$pr" >> "$GITHUB_OUTPUT"
+            echo "head=$head" >> "$GITHUB_OUTPUT"
+            echo "issue=$linked_issue" >> "$GITHUB_OUTPUT"
+            echo "recovered=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [[ "$review_decision" != "APPROVED" ]]; then
             echo "PR #$pr is not approved (reviewDecision=$review_decision); leaving it for Review Gate."
             echo "recovered=false" >> "$GITHUB_OUTPUT"
@@ -237,6 +246,87 @@ jobs:
           echo "recovered=true" >> "$GITHUB_OUTPUT"
           echo "pr=$pr" >> "$GITHUB_OUTPUT"
           echo "main_sha=$main_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Install pinned Copilot CLI for review repair
+        if: steps.lease.outputs.acquired == 'true' && steps.recover.outputs.repair_needed == 'true'
+        run: npm install -g "@github/copilot@$COPILOT_VERSION"
+
+      - name: Repair requested review findings
+        id: reviewrepair
+        if: steps.lease.outputs.acquired == 'true' && steps.recover.outputs.repair_needed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr="${{ steps.recover.outputs.pr }}"
+          head="${{ steps.recover.outputs.head }}"
+          issue="${{ steps.recover.outputs.issue }}"
+
+          git fetch origin "$head"
+          git checkout -B "$head" "origin/$head"
+          before_sha="$(git rev-parse HEAD)"
+
+          gh issue view "$issue" --repo "$REPO" --json body --jq '.body' > /tmp/aidi-review-plan.md
+          gh pr view "$pr" --repo "$REPO" --json reviews \
+            --jq '[.reviews[]? | select(.state == "CHANGES_REQUESTED") | .body] | join("\n\n---\n\n")' \
+            > /tmp/aidi-review-findings.md
+
+          test -s /tmp/aidi-review-findings.md || {
+            echo "CHANGES_REQUESTED was reported but no actionable review body was found; leaving PR for Review Gate."
+            exit 0
+          }
+
+          copilot -p "
+          Repair the existing implementation for GitHub issue #$issue using the authoritative
+          Issue scope in /tmp/aidi-review-plan.md and the blocking review findings in
+          /tmp/aidi-review-findings.md. Make only the smallest product changes needed to satisfy
+          the requested changes while preserving all already-satisfied acceptance criteria.
+          Do not commit, push, open/merge PRs, change GitHub settings, or access any local AIDI,
+          Forgejo, VM, self-hosted runner, queue, database, file or state outside this checkout.
+          " \
+            -s \
+            --add-dir=/tmp \
+            --allow-tool='read,write,shell(go:*),shell(gofmt:*),shell(python:*),shell(npm:*),shell(node:*),shell(git status),shell(git diff:*),shell(grep:*),shell(find:*),shell(mkdir:*)' \
+            --no-ask-user
+
+          test -z "$(gofmt -l .)"
+          go mod verify
+          go vet ./...
+          go test -race ./...
+          python -m compileall -q workers/src workers/tests
+          PYTHONPATH=workers/src python -m unittest discover -s workers/tests -v
+          (
+            cd web
+            npm ci --ignore-scripts --no-audit --no-fund
+            npm run build
+          )
+          rm -f web/tsconfig.tsbuildinfo
+
+          if [[ -z "$(git status --porcelain)" ]]; then
+            echo "Bounded review repair produced no source change; leaving PR for independent re-review."
+            exit 0
+          fi
+
+          git add -A
+          git commit -m "fix(release-a): address review findings (#$issue)"
+          git push origin "HEAD:$head"
+          repaired_sha="$(git rev-parse HEAD)"
+          [[ "$repaired_sha" != "$before_sha" ]]
+
+          gh workflow run ci.yml --repo "$REPO" --ref "$head"
+          run_id=""
+          for _ in $(seq 1 30); do
+            run_id="$(gh run list --repo "$REPO" --workflow ci.yml --branch "$head" \
+              --event workflow_dispatch --limit 20 --json databaseId,headSha | \
+              jq -r --arg sha "$repaired_sha" '.[] | select(.headSha == $sha) | .databaseId' | head -n1)"
+            [[ -n "$run_id" ]] && break
+            sleep 4
+          done
+          test -n "$run_id"
+          gh run watch "$run_id" --repo "$REPO" --exit-status
+
+          gh pr comment "$pr" --repo "$REPO" --body "Native review-repair updated the branch for the blocking review findings and exact-head workflow_dispatch CI is green. A fresh independent Review Gate approval is still required before merge."
+          echo "sha=$repaired_sha" >> "$GITHUB_OUTPUT"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
 
       - name: Verify previous GitHub cycle is complete
         id: previous
