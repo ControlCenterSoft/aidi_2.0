@@ -23,6 +23,10 @@ state-transition validation only:
 - `ServiceIdentity` and its `ServiceIdentityID`/`ServiceKind`/`Scope`/
   `ServiceCredential` building blocks (SPEC §3.3) — see "Service Identities"
   below.
+- `LocalAdminAccount` and its `LocalAdminAccountState`/
+  `ValidateLocalAdminTransition`/`RequireInitialized`/`BreakGlassEligible`
+  contract for the mandatory local admin bootstrap and break-glass identity
+  (SPEC §3.1) — see "Local Admin Bootstrap and Break-Glass" below.
 
 There is no HTTP/API surface, no persistence and no external identity
 provider integration in this package. Concrete adapters (Local Identity, AD,
@@ -101,6 +105,40 @@ Concrete credential issuance/rotation, persistence, Node Agent/CRM adapter
 wiring and any transport binding are out of scope for this slice and remain
 later Release A/B work.
 
+## Local Admin Bootstrap and Break-Glass
+
+Per SPEC §3.1 ("После clean install создаётся local admin/admin. Система
+остаётся UNINITIALIZED до обязательной смены пароля при первом входе." /
+"Local administrative identity сохраняется как break-glass даже при
+использовании внешнего IdP"), `LocalAdminAccount` models the mandatory local
+administrative identity as a pure value type — no password hashing/crypto,
+persistence or HTTP/API surface:
+
+- `LocalAdminAccountState` — `UNINITIALIZED` (the clean-install default) or
+  `ACTIVE`.
+- `ValidateLocalAdminTransition(current, next, credentialRevision)` allows
+  only the single, one-way `UNINITIALIZED → ACTIVE` transition, and only
+  when `credentialRevision >= 1` proves an actual credential-change event
+  occurred; a state-only request with no such proof is rejected
+  (`ErrLocalAdminTransitionUnproven`). `ACTIVE → UNINITIALIZED` and any
+  self-loop are rejected regardless of `credentialRevision`.
+- `LocalAdminAccount.Validate()` enforces that an `ACTIVE` account always
+  carries `CredentialRevision >= 1` — an `ACTIVE` account with no recorded
+  credential change (still "admin/admin"-equivalent) is rejected
+  (`ErrLocalAdminCredentialNotChanged`).
+- `RequireInitialized` is the guard normal operation must call: it returns
+  `ErrLocalAdminNotInitialized` while `State == UNINITIALIZED`, encoding that
+  "штатная эксплуатация до смены пароля невозможна" (AC-INST-002).
+- `BreakGlassEligible(account, externalIdPHealthy)` reports whether the
+  account is a valid break-glass recovery identity. It never inspects
+  `externalIdPHealthy` beyond accepting it as a parameter — eligibility
+  depends solely on the account being a valid, `ACTIVE` local admin account,
+  proving Local Identity validity never depends on external IdP
+  availability (AC-ID-001, AC-ID-004).
+
+Password hashing/verification, first-login enforcement wiring, and any HTTP/
+persistence integration remain later Release A/B work.
+
 ## Evidence
 
 The package tests cover:
@@ -120,6 +158,20 @@ The package tests cover:
 - `ServiceIdentity.Validate()` for a well-formed identity and every
   rejection case (invalid id, unknown kind, zero scopes, duplicate scopes,
   wildcard scope, invalid credential lifetime).
+- a freshly constructed `LocalAdminAccount` is `UNINITIALIZED` with
+  `CredentialRevision == 0` and `RequireInitialized` rejects it
+  (AC-INST-002);
+- every legal and illegal `LocalAdminAccountState` transition — only
+  `UNINITIALIZED → ACTIVE` is legal, and only when accompanied by a proven
+  credential-change event (`credentialRevision >= 1`); a state-only request
+  without that proof is rejected (`ErrLocalAdminTransitionUnproven`), and
+  `ACTIVE → UNINITIALIZED` and every self-loop is rejected regardless of
+  `credentialRevision`;
+- `LocalAdminAccount.Validate()` rejecting an `ACTIVE` account with
+  `CredentialRevision < 1` (still admin/admin-equivalent);
+- `BreakGlassEligible` returning `true` for a valid `ACTIVE` local admin
+  account for both `externalIdPHealthy == true` and `== false`, and `false`
+  for an uninitialized or otherwise invalid account (AC-ID-001, AC-ID-004).
 
 This package has no dependency on `net/http`, `database/sql`, NATS,
 Temporal, or any external identity provider — pure domain logic only,
