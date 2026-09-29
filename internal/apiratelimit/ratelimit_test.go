@@ -123,6 +123,35 @@ func TestEvaluate_BoundaryValues(t *testing.T) {
 	}
 }
 
+func TestDecision_Validate(t *testing.T) {
+	cases := []struct {
+		name     string
+		decision Decision
+		wantErr  bool
+	}{
+		{name: "valid allowed", decision: Decision{Allowed: true, RetryAfter: 0, Limit: 5, Remaining: 1}, wantErr: false},
+		{name: "valid denied", decision: Decision{Allowed: false, RetryAfter: time.Second, Limit: 5, Remaining: 0}, wantErr: false},
+		{name: "valid denied zero retry", decision: Decision{Allowed: false, RetryAfter: 0, Limit: 5, Remaining: 0}, wantErr: false},
+		{name: "allowed with non-zero retry", decision: Decision{Allowed: true, RetryAfter: time.Second, Limit: 5, Remaining: 1}, wantErr: true},
+		{name: "denied with negative retry", decision: Decision{Allowed: false, RetryAfter: -time.Second, Limit: 5, Remaining: 0}, wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.decision.Validate()
+			if tc.wantErr {
+				if !errors.Is(err, ErrInvalidDecision) {
+					t.Fatalf("expected ErrInvalidDecision, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestEvaluate_IsDeterministic(t *testing.T) {
 	policy := Policy{Window: 30 * time.Second, Limit: 3}
 	key := LimitKey{Subject: "svc-1", Operation: "create_project"}

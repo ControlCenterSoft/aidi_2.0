@@ -229,3 +229,34 @@ func TestFromRateLimitDecision_RejectsAllowedDecision(t *testing.T) {
 		t.Fatalf("expected ErrInvalidError for allowed decision, got %v", err)
 	}
 }
+
+func TestFromRateLimitDecision_RejectsAllowedWithNonZeroRetryAfter(t *testing.T) {
+	// Malformed decision: Allowed is true but RetryAfter is non-zero,
+	// violating the Decision invariant. This must be rejected even
+	// though the earlier Allowed check alone would not catch it.
+	decision := apiratelimit.Decision{
+		Allowed:    true,
+		RetryAfter: time.Second,
+		Limit:      5,
+		Remaining:  3,
+	}
+
+	if _, err := FromRateLimitDecision(decision, "corr-104"); !errors.Is(err, ErrInvalidError) {
+		t.Fatalf("expected ErrInvalidError for allowed decision with non-zero retry after, got %v", err)
+	}
+}
+
+func TestFromRateLimitDecision_RejectsDeniedWithNegativeRetryAfter(t *testing.T) {
+	// Malformed decision: denied with a negative RetryAfter must not be
+	// serialized as a negative retry_after_ms.
+	decision := apiratelimit.Decision{
+		Allowed:    false,
+		RetryAfter: -time.Second,
+		Limit:      5,
+		Remaining:  0,
+	}
+
+	if _, err := FromRateLimitDecision(decision, "corr-105"); !errors.Is(err, ErrInvalidError) {
+		t.Fatalf("expected ErrInvalidError for denied decision with negative retry after, got %v", err)
+	}
+}

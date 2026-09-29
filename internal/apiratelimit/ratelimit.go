@@ -86,6 +86,21 @@ type Decision struct {
 	Remaining  uint64        `json:"remaining"`
 }
 
+// Validate enforces the Decision invariant documented above: RetryAfter
+// must be zero when Allowed is true, and must be non-negative in all
+// cases. Callers that map a Decision onto another representation (e.g.
+// apierror.FromRateLimitDecision) must call Validate so a manually
+// constructed, malformed Decision cannot be serialized downstream.
+func (d Decision) Validate() error {
+	if d.Allowed && d.RetryAfter != 0 {
+		return fmt.Errorf("%w: retry after must be zero when allowed", ErrInvalidDecision)
+	}
+	if d.RetryAfter < 0 {
+		return fmt.Errorf("%w: retry after must be non-negative", ErrInvalidDecision)
+	}
+	return nil
+}
+
 // Evaluate computes a Decision deterministically from policy, key,
 // requestsInWindow (usage already observed in the current window) and now
 // (the caller-supplied evaluation instant). It is a pure function: it

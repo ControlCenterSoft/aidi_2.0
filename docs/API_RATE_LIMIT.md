@@ -47,7 +47,11 @@ func Evaluate(policy Policy, key LimitKey, requestsInWindow uint64, now time.Tim
   `requestsInWindow` observed usage for a `LimitKey` at a given `now`.
   `RetryAfter` is zero when `Allowed` is `true`, and positive when
   `Allowed` is `false`. `Limit`/`Remaining` report the policy limit and the
-  remaining budget in the current window.
+  remaining budget in the current window. `Decision.Validate()` enforces
+  this invariant (rejecting an `Allowed == true` decision with a non-zero
+  `RetryAfter`, or any decision with a negative `RetryAfter`) and is
+  invoked by `FromRateLimitDecision` so a manually constructed, malformed
+  `Decision` can never be serialized into an API error.
 - `Evaluate` — a pure function computing `Decision` deterministically from
   its inputs only: identical `(policy, key, requestsInWindow, now)` always
   produce an identical `Decision`. It reads no clock, global, or singleton
@@ -81,6 +85,9 @@ following the `FromRevisionConflict` mapping pattern exactly:
   machine-readable context.
 - An `Allowed == true` decision is rejected: there is nothing to map into
   an error.
+- A malformed `Decision` (e.g. `Allowed == true` with a non-zero
+  `RetryAfter`, or a negative `RetryAfter`) is rejected via
+  `Decision.Validate()` before any mapping is attempted.
 
 ## Scope boundary
 

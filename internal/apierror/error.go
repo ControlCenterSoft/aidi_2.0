@@ -145,6 +145,9 @@ func FromRateLimitDecision(decision apiratelimit.Decision, correlationID string)
 	if decision.Allowed {
 		return Error{}, fmt.Errorf("%w: allowed decision cannot be mapped to an error", ErrInvalidError)
 	}
+	if err := decision.Validate(); err != nil {
+		return Error{}, fmt.Errorf("%w: %v", ErrInvalidError, err)
+	}
 	e, err := New(
 		CodeRateLimited,
 		"rate limit exceeded",
