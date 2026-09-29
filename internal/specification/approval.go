@@ -3,6 +3,7 @@ package specification
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 // ApprovalID identifies an Approval decision on a Specification.
@@ -17,7 +18,7 @@ const (
 )
 
 // ErrInvalidApproval is returned when an Approval violates the invariants
-// required by SPEC §5.5/§9.5: required identifiers, a positive exact
+// required by SPEC §5.5: required identifiers, a positive exact
 // Specification version, a known decision value, and a non-empty approver.
 var ErrInvalidApproval = errors.New("invalid approval")
 
@@ -43,9 +44,10 @@ type Approval struct {
 	SpecificationVersion uint64
 	Approver             string
 	Decision             ApprovalDecision
+	DecidedAt            time.Time
 }
 
-// Validate checks the invariants required by SPEC §5.5/§9.5: a non-empty
+// Validate checks the invariants required by SPEC §5.5: a non-empty
 // ApprovalID, a non-empty target SpecificationID, a positive
 // SpecificationVersion (the exact version being approved/rejected), a known
 // ApprovalDecision, and a non-empty Approver identity.

@@ -59,17 +59,19 @@ This directly supports **AC-SPEC-003** (significant decisions become
 structured Requirements/Decisions) and **AC-SPEC-004** (a critical conflict
 blocks Approval), as listed in `docs/ACCEPTANCE.md`.
 
-## Approval bound to an exact Specification version (SPEC §5.5/§9.5, AC-SPEC-004/AC-SPEC-009)
+## Approval bound to an exact Specification version (SPEC §5.5, AC-SPEC-004/AC-SPEC-009)
 
 `Approval` is the first-class entity from SPEC §4.1 recording the decision
 that closes out a Specification review. It always attaches to an exact
 `SpecificationVersion` (`uint64`, mirroring the `Requirement.Version`
-pattern) rather than to the Specification in general:
+pattern) rather than to the Specification in general, and carries a
+`DecidedAt` (`time.Time`) timestamp recording when the decision was made:
 
 - `Approval.Validate()` enforces SPEC §5.5's required fields: a non-empty
   `ID`, a non-empty target `SpecificationID`, a positive
   `SpecificationVersion`, a known `Decision` (`APPROVED`/`REJECTED`), and a
   non-empty `Approver`. Violations are reported via `ErrInvalidApproval`.
+  `DecidedAt` records the decision timestamp.
 - `NewApproval(a Approval, requirements []Requirement) (Approval, error)`
   composes with the existing `ApprovalReady` gate (SPEC §5.3, AC-SPEC-004)
   as a precondition instead of duplicating the conflict check: it returns
