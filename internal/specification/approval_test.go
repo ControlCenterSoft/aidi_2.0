@@ -3,7 +3,10 @@ package specification
 import (
 	"errors"
 	"testing"
+	"time"
 )
+
+var validApprovalDecidedAt = time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
 
 func validApproval() Approval {
 	return Approval{
@@ -12,6 +15,20 @@ func validApproval() Approval {
 		SpecificationVersion: 1,
 		Approver:             "user-1",
 		Decision:             DecisionApproved,
+		DecidedAt:            validApprovalDecidedAt,
+	}
+}
+
+func TestApprovalCarriesDecidedAtTimestamp(t *testing.T) {
+	a := validApproval()
+	if err := a.Validate(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !a.DecidedAt.Equal(validApprovalDecidedAt) {
+		t.Fatalf("DecidedAt=%v want=%v", a.DecidedAt, validApprovalDecidedAt)
+	}
+	if a.DecidedAt.IsZero() {
+		t.Fatalf("DecidedAt must not be zero for a valid approval")
 	}
 }
 
