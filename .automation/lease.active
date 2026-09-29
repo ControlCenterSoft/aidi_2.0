@@ -1,0 +1,6 @@
+{
+  "owner": "controller-workflow-repair-20260929T0635Z",
+  "started_at": "2026-09-29T06:35:00Z",
+  "lease_until": "2026-09-29T06:40:00Z",
+  "task_role": "AIDI Controller workflow repair"
+}
