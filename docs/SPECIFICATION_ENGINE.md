@@ -59,6 +59,36 @@ This directly supports **AC-SPEC-003** (significant decisions become
 structured Requirements/Decisions) and **AC-SPEC-004** (a critical conflict
 blocks Approval), as listed in `docs/ACCEPTANCE.md`.
 
+## Approval bound to an exact Specification version (SPEC §5.5/§9.5, AC-SPEC-004/AC-SPEC-009)
+
+`Approval` is the first-class entity from SPEC §4.1 recording the decision
+that closes out a Specification review. It always attaches to an exact
+`SpecificationVersion` (`uint64`, mirroring the `Requirement.Version`
+pattern) rather than to the Specification in general:
+
+- `Approval.Validate()` enforces SPEC §5.5's required fields: a non-empty
+  `ID`, a non-empty target `SpecificationID`, a positive
+  `SpecificationVersion`, a known `Decision` (`APPROVED`/`REJECTED`), and a
+  non-empty `Approver`. Violations are reported via `ErrInvalidApproval`.
+- `NewApproval(a Approval, requirements []Requirement) (Approval, error)`
+  composes with the existing `ApprovalReady` gate (SPEC §5.3, AC-SPEC-004)
+  as a precondition instead of duplicating the conflict check: it returns
+  `ErrApprovalNotReady` when any `Requirement` for the target Specification
+  still carries `CONFLICT`, and otherwise delegates to `Validate()`.
+- `ApprovalCurrentForVersion(approval Approval, currentSpecificationVersion uint64) error`
+  implements SPEC §5.5 / AC-SPEC-009 — *"Approval всегда относится к exact
+  Specification version"*: an `Approval` bound to version `N` does **not**
+  silently authorize version `N+1`. It returns `ErrApprovalVersionMismatch`
+  whenever `approval.SpecificationVersion` differs from the Specification's
+  current version, so any further change beyond the approved version must
+  go through a Change Request rather than being treated as still approved.
+
+This directly covers **AC-SPEC-004** (critical conflict blocks Approval,
+reused rather than reimplemented) and **AC-SPEC-009** (Approval bound to an
+exact Specification version), as listed in `docs/ACCEPTANCE.md`. Change
+Request lifecycle, persistence, HTTP/API, and workflow-engine wiring remain
+out of scope for this bounded slice.
+
 ## Status transitions
 
 `ValidateStatusTransition(current, next RequirementStatus) error` is the
@@ -91,6 +121,17 @@ The package tests (`internal/specification/specification_test.go`) cover:
 - `ApprovalReady` returning `false` with correct blocking IDs when any
   unresolved `CONFLICT` exists, and `true` otherwise (including empty input);
 - every legal and illegal `RequirementStatus` transition.
+
+`internal/specification/approval_test.go` covers:
+
+- valid/invalid `Approval` (id, specification id, version, decision,
+  approver);
+- `NewApproval` refusing construction while a `CONFLICT` requirement is
+  outstanding (`ErrApprovalNotReady`), and permitting it once resolved or
+  when there are no requirements at all;
+- `ApprovalCurrentForVersion` accepting a matching version and rejecting a
+  mismatched one (`ErrApprovalVersionMismatch`), including the explicit
+  N vs. N+1 case from AC-SPEC-009.
 
 This package is pure domain logic: no HTTP/API, no persistence
 (`database/sql`), no durable-workflow (Temporal) or event-bus (NATS)
