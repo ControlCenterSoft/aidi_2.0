@@ -20,6 +20,9 @@ state-transition validation only:
   state transitions.
 - `NewProjectMembershipFromInvitation`, which fails closed unless the source
   invitation is `ACCEPTED`.
+- `ServiceIdentity` and its `ServiceIdentityID`/`ServiceKind`/`Scope`/
+  `ServiceCredential` building blocks (SPEC §3.3) — see "Service Identities"
+  below.
 
 There is no HTTP/API surface, no persistence and no external identity
 provider integration in this package. Concrete adapters (Local Identity, AD,
@@ -68,6 +71,36 @@ this by construction: it returns `ErrMembershipRequiresAcceptedInvitation`
 for any non-`ACCEPTED` invitation state, and `ErrMembershipInviteeMismatch`
 if the derived user does not match the invitation's exact invitee.
 
+## Service Identities
+
+Per SPEC §3.3 ("Node Agent, CRM, providers и automation используют отдельные
+service/workload identities, а не пользовательские аккаунты"), `internal/
+identity` also defines a `ServiceIdentity` contract for non-user,
+workload/automation principals — structurally separate from
+`UserID`/`Role`/`ProjectMembership` so a service identity can never be
+constructed as, or satisfy validation for, a user account or project
+membership:
+
+- `ServiceIdentityID` — a distinct identifier type from `UserID`, validated
+  the same way (non-empty, non-blank).
+- `ServiceKind` — one of `NODE_AGENT`, `CRM`, `PROVIDER`, `AUTOMATION`.
+- `Scope`/`Permission` — an explicit, enumerable least-privilege grant.
+  Mirroring the `ProjectInvitation` exact-invitee anti-wildcard pattern, a
+  `Scope`'s `Permission` must be a single, non-empty, non-whitespace-padded,
+  non-wildcard/glob-like string — there is no blanket/wildcard scope.
+- `ServiceCredential` — carries `IssuedAt`/`ExpiresAt`. SPEC §3.3 requires
+  workload credentials to be short-lived where possible; `Validate()`
+  encodes the checkable minimum invariant: both timestamps must be set and
+  `ExpiresAt` must be strictly after `IssuedAt` (a zero, unbounded, or
+  already-expired-at-issuance credential is rejected).
+- `ServiceIdentity` — the aggregate (`ID`, `Kind`, `Scopes`, `Credential`).
+  `Validate()` enforces: a valid `ID`, a known `Kind`, at least one explicit
+  scope, no duplicate scopes, and a valid, strictly bounded credential.
+
+Concrete credential issuance/rotation, persistence, Node Agent/CRM adapter
+wiring and any transport binding are out of scope for this slice and remain
+later Release A/B work.
+
 ## Evidence
 
 The package tests cover:
@@ -79,7 +112,14 @@ The package tests cover:
 - rejection of invitations not addressed to an exact login/email
   (empty, whitespace-padded, wildcard/glob, or multi-token identifiers);
 - rejection of deriving `ProjectMembership` from a non-`ACCEPTED`
-  invitation.
+  invitation;
+- valid/invalid `ServiceIdentityID`/`ServiceKind`/`Scope` validation,
+  including rejection of wildcard/glob-like and whitespace-padded scopes;
+- `ServiceCredential` lifetime validation, including zero timestamps,
+  equal `IssuedAt`/`ExpiresAt`, and `ExpiresAt` before `IssuedAt`;
+- `ServiceIdentity.Validate()` for a well-formed identity and every
+  rejection case (invalid id, unknown kind, zero scopes, duplicate scopes,
+  wildcard scope, invalid credential lifetime).
 
 This package has no dependency on `net/http`, `database/sql`, NATS,
 Temporal, or any external identity provider — pure domain logic only,
