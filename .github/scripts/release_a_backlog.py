@@ -8,6 +8,7 @@ GitHub Issues whose titles begin with the exact stable key, e.g. [A1-001].
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -19,7 +20,9 @@ KEY_RE = re.compile(r"^\[([A-Z0-9-]+)\]\s")
 EXPECTED_IMPLEMENTATION = 86
 EXPECTED_GATES = 15
 EXPECTED_TOTAL = 101
+EXPECTED_EDGES = 263
 EXPECTED_SOURCE_SHA256 = "91f720101294c36b8243cbead1c064d67f8d27f33dd52386f256a9102c8393aa"
+EXPECTED_INDEX_SHA256 = "eaa6b5d368142d886300b72b85e594188fe88551b19fa0b49ce8cc6b1c971f29"
 
 
 class BacklogError(RuntimeError):
@@ -36,7 +39,13 @@ class Card:
 
 
 def load_cards(path: Path) -> list[Card]:
-    lines = path.read_text(encoding="utf-8").splitlines()
+    raw_bytes = path.read_bytes()
+    index_sha = hashlib.sha256(raw_bytes).hexdigest()
+    if index_sha != EXPECTED_INDEX_SHA256:
+        raise BacklogError(
+            f"execution index sha256 mismatch: {index_sha}; expected {EXPECTED_INDEX_SHA256}"
+        )
+    lines = raw_bytes.decode("utf-8").splitlines()
     if not lines or not lines[0].startswith("source_sha256\t"):
         raise BacklogError("missing source_sha256 header")
     source_sha = lines[0].split("\t", 1)[1].strip()
@@ -81,6 +90,12 @@ def validate_cards(cards: list[Card]) -> dict[str, Card]:
         raise BacklogError(
             f"card counts mismatch: implementation={impl}, gates={gates}, "
             f"total={len(cards)}"
+        )
+
+    edge_count = sum(len(card.dependencies) for card in cards)
+    if edge_count != EXPECTED_EDGES:
+        raise BacklogError(
+            f"hard-dependency edge count mismatch: {edge_count}; expected {EXPECTED_EDGES}"
         )
 
     missing = sorted(
@@ -215,7 +230,9 @@ def main(argv: Iterable[str] | None = None) -> int:
                         "implementation": EXPECTED_IMPLEMENTATION,
                         "gates": EXPECTED_GATES,
                         "total": EXPECTED_TOTAL,
+                        "hard_dependency_edges": EXPECTED_EDGES,
                         "source_sha256": EXPECTED_SOURCE_SHA256,
+                        "index_sha256": EXPECTED_INDEX_SHA256,
                     },
                     sort_keys=True,
                 )
