@@ -1,8 +1,0 @@
-{
-  "owner": "chatgpt-supervisory-review-pr46-20260929T1152Z",
-  "started_at": "2026-09-29T11:52:00Z",
-  "lease_until": "2026-09-29T11:55:00Z",
-  "task_role": "supervisory_review",
-  "issue": 45,
-  "slice": "PR-46"
-}
