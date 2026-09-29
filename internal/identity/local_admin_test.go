@@ -69,22 +69,26 @@ func TestLocalAdminAccountValidation(t *testing.T) {
 
 func TestValidateLocalAdminTransition(t *testing.T) {
 	cases := []struct {
-		name    string
-		current LocalAdminAccountState
-		next    LocalAdminAccountState
-		wantErr error
+		name               string
+		current            LocalAdminAccountState
+		next               LocalAdminAccountState
+		credentialRevision int
+		wantErr            error
 	}{
-		{"uninitialized to active legal", LocalAdminUninitialized, LocalAdminActive, nil},
-		{"uninitialized to uninitialized (self-loop) rejected", LocalAdminUninitialized, LocalAdminUninitialized, ErrInvalidLocalAdminTransition},
-		{"active to uninitialized rejected", LocalAdminActive, LocalAdminUninitialized, ErrInvalidLocalAdminTransition},
-		{"active to active (self-loop) rejected", LocalAdminActive, LocalAdminActive, ErrInvalidLocalAdminTransition},
-		{"invalid current state", LocalAdminAccountState("BOGUS"), LocalAdminActive, ErrInvalidLocalAdminState},
-		{"invalid next state", LocalAdminUninitialized, LocalAdminAccountState("BOGUS"), ErrInvalidLocalAdminState},
+		{"uninitialized to active with proof legal", LocalAdminUninitialized, LocalAdminActive, 1, nil},
+		{"uninitialized to active with higher proof legal", LocalAdminUninitialized, LocalAdminActive, 42, nil},
+		{"uninitialized to active without proof rejected", LocalAdminUninitialized, LocalAdminActive, 0, ErrLocalAdminTransitionUnproven},
+		{"uninitialized to active with negative proof rejected", LocalAdminUninitialized, LocalAdminActive, -1, ErrLocalAdminTransitionUnproven},
+		{"uninitialized to uninitialized (self-loop) rejected", LocalAdminUninitialized, LocalAdminUninitialized, 1, ErrInvalidLocalAdminTransition},
+		{"active to uninitialized rejected", LocalAdminActive, LocalAdminUninitialized, 1, ErrInvalidLocalAdminTransition},
+		{"active to active (self-loop) rejected", LocalAdminActive, LocalAdminActive, 1, ErrInvalidLocalAdminTransition},
+		{"invalid current state", LocalAdminAccountState("BOGUS"), LocalAdminActive, 1, ErrInvalidLocalAdminState},
+		{"invalid next state", LocalAdminUninitialized, LocalAdminAccountState("BOGUS"), 1, ErrInvalidLocalAdminState},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := ValidateLocalAdminTransition(tc.current, tc.next)
+			err := ValidateLocalAdminTransition(tc.current, tc.next, tc.credentialRevision)
 			if err != tc.wantErr {
 				t.Fatalf("got %v, want %v", err, tc.wantErr)
 			}

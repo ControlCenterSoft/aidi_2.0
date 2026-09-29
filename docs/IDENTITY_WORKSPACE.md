@@ -116,9 +116,12 @@ persistence or HTTP/API surface:
 
 - `LocalAdminAccountState` — `UNINITIALIZED` (the clean-install default) or
   `ACTIVE`.
-- `ValidateLocalAdminTransition` allows only the single, one-way
-  `UNINITIALIZED → ACTIVE` transition, driven by a proven credential-change
-  event; `ACTIVE → UNINITIALIZED` and any self-loop are rejected.
+- `ValidateLocalAdminTransition(current, next, credentialRevision)` allows
+  only the single, one-way `UNINITIALIZED → ACTIVE` transition, and only
+  when `credentialRevision >= 1` proves an actual credential-change event
+  occurred; a state-only request with no such proof is rejected
+  (`ErrLocalAdminTransitionUnproven`). `ACTIVE → UNINITIALIZED` and any
+  self-loop are rejected regardless of `credentialRevision`.
 - `LocalAdminAccount.Validate()` enforces that an `ACTIVE` account always
   carries `CredentialRevision >= 1` — an `ACTIVE` account with no recorded
   credential change (still "admin/admin"-equivalent) is rejected
@@ -159,8 +162,11 @@ The package tests cover:
   `CredentialRevision == 0` and `RequireInitialized` rejects it
   (AC-INST-002);
 - every legal and illegal `LocalAdminAccountState` transition — only
-  `UNINITIALIZED → ACTIVE` is legal; `ACTIVE → UNINITIALIZED` and every
-  self-loop is rejected;
+  `UNINITIALIZED → ACTIVE` is legal, and only when accompanied by a proven
+  credential-change event (`credentialRevision >= 1`); a state-only request
+  without that proof is rejected (`ErrLocalAdminTransitionUnproven`), and
+  `ACTIVE → UNINITIALIZED` and every self-loop is rejected regardless of
+  `credentialRevision`;
 - `LocalAdminAccount.Validate()` rejecting an `ACTIVE` account with
   `CredentialRevision < 1` (still admin/admin-equivalent);
 - `BreakGlassEligible` returning `true` for a valid `ACTIVE` local admin

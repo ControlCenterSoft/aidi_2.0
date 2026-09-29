@@ -40,6 +40,12 @@ var (
 	// normal operation is attempted while the local admin account is still
 	// UNINITIALIZED (AC-INST-002).
 	ErrLocalAdminNotInitialized = errors.New("identity: local admin account is not initialized; mandatory first-login credential change is required")
+	// ErrLocalAdminTransitionUnproven is returned by
+	// ValidateLocalAdminTransition when a UNINITIALIZED -> ACTIVE move is
+	// requested without a proven credential-change event (a positive
+	// credential revision). Issue #41 requires activation to occur only on
+	// a proven credential change, not merely on the requested state values.
+	ErrLocalAdminTransitionUnproven = errors.New("identity: local admin activation requires a proven credential-change event")
 )
 
 func (s LocalAdminAccountState) Validate() error {
@@ -97,8 +103,15 @@ func (a LocalAdminAccount) Validate() error {
 // other than the single legal, one-way move UNINITIALIZED -> ACTIVE, which
 // must only be driven by a proven credential-change event. In particular
 // ACTIVE -> UNINITIALIZED (reverting the mandatory first-login change) and
-// any self-loop are rejected.
-func ValidateLocalAdminTransition(current, next LocalAdminAccountState) error {
+// any self-loop are rejected regardless of credentialRevision.
+//
+// credentialRevision is the caller's proof that a credential-change event
+// actually occurred (e.g. the new CredentialRevision the account would
+// carry post-transition). The UNINITIALIZED -> ACTIVE move is only legal
+// when credentialRevision >= 1; a state-only request without that proof is
+// rejected with ErrLocalAdminTransitionUnproven, so activation can never be
+// driven by state values alone.
+func ValidateLocalAdminTransition(current, next LocalAdminAccountState, credentialRevision int) error {
 	if err := current.Validate(); err != nil {
 		return err
 	}
@@ -106,6 +119,9 @@ func ValidateLocalAdminTransition(current, next LocalAdminAccountState) error {
 		return err
 	}
 	if current == LocalAdminUninitialized && next == LocalAdminActive {
+		if credentialRevision < 1 {
+			return ErrLocalAdminTransitionUnproven
+		}
 		return nil
 	}
 	return ErrInvalidLocalAdminTransition
