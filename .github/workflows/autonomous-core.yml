@@ -133,15 +133,15 @@ jobs:
           sha="$(gh pr view "$pr" --repo "$REPO" --json headRefOid --jq '.headRefOid')"
 
           run_id="$(gh run list --repo "$REPO" --workflow ci.yml --branch "$head" --limit 20 \
-            --json databaseId,headSha,status,conclusion | \
-            jq -r --arg sha "$sha" '.[] | select(.headSha == $sha) | .databaseId' | head -n1)"
+            --json databaseId,headSha,status,conclusion,event | \
+            jq -r --arg sha "$sha" '.[] | select(.headSha == $sha and .event == "workflow_dispatch") | .databaseId' | head -n1)"
 
           if [[ -z "$run_id" ]]; then
             gh workflow run ci.yml --repo "$REPO" --ref "$head"
             for _ in $(seq 1 30); do
               run_id="$(gh run list --repo "$REPO" --workflow ci.yml --branch "$head" --limit 20 \
-                --json databaseId,headSha | \
-                jq -r --arg sha "$sha" '.[] | select(.headSha == $sha) | .databaseId' | head -n1)"
+                --json databaseId,headSha,event | \
+                jq -r --arg sha "$sha" '.[] | select(.headSha == $sha and .event == "workflow_dispatch") | .databaseId' | head -n1)"
               [[ -n "$run_id" ]] && break
               sleep 4
             done
@@ -171,8 +171,8 @@ jobs:
           main_run=""
           for _ in $(seq 1 30); do
             main_run="$(gh run list --repo "$REPO" --workflow ci.yml --branch main --limit 20 \
-              --json databaseId,headSha | \
-              jq -r --arg sha "$main_sha" '.[] | select(.headSha == $sha) | .databaseId' | head -n1)"
+              --json databaseId,headSha,event | \
+              jq -r --arg sha "$main_sha" '.[] | select(.headSha == $sha and .event == "workflow_dispatch") | .databaseId' | head -n1)"
             [[ -n "$main_run" ]] && break
             sleep 4
           done
@@ -187,8 +187,8 @@ jobs:
           dev_run=""
           for _ in $(seq 1 30); do
             dev_run="$(gh run list --repo "$REPO" --workflow ci.yml --branch development --limit 20 \
-              --json databaseId,headSha | \
-              jq -r --arg sha "$main_sha" '.[] | select(.headSha == $sha) | .databaseId' | head -n1)"
+              --json databaseId,headSha,event | \
+              jq -r --arg sha "$main_sha" '.[] | select(.headSha == $sha and .event == "workflow_dispatch") | .databaseId' | head -n1)"
             [[ -n "$dev_run" ]] && break
             sleep 4
           done
