@@ -1,0 +1,56 @@
+{
+  "release": {
+    "product": "AIDI",
+    "version": "2.0.0",
+    "release": "A — FOUNDATION",
+    "spec_baseline": "AIDI SPEC 2.0.0 APPROVED",
+    "manifest_version": "1.0",
+    "tracker_target": "Gitea",
+    "implementation_issue_count": 86,
+    "gate_issue_count": 15,
+    "total_card_count": 101
+  },
+  "milestones": [
+    {
+      "key": "A-M1",
+      "title": "Canonical Core",
+      "description": "Codebase, canonical domain/persistence, event journal, outbox/inbox and NATS foundation."
+    },
+    {
+      "key": "A-M2",
+      "title": "Durable Core",
+      "description": "Temporal durable workflows and restart-safe execution primitives."
+    },
+    {
+      "key": "A-M3",
+      "title": "Trusted Managed Node",
+      "description": "Policy, Tool Broker, Node Agent, PKI, secure enrollment, leases and fencing."
+    },
+    {
+      "key": "A-M4",
+      "title": "Installable Foundation",
+      "description": "Installer, runtime, observability, admin interface and integrity/recovery foundation."
+    },
+    {
+      "key": "A-M5",
+      "title": "Foundation Accepted",
+      "description": "Automated tests, Foundation E2E, PMI and final Release A acceptance."
+    }
+  ],
+  "labels": {
+    "type": ["feature","infra","security","test","migration","api","observability","installer","workflow","refactor","tooling"],
+    "area": ["build","domain","persistence","events","workflow","policy","toolbroker","node-agent","pki","lease","installer","telemetry","api","recovery","testing"],
+    "priority": ["P0","P1"],
+    "risk": ["concurrency","security","state","migration","infrastructure"]
+  },
+  "automation": {
+    "auto_ready": "Move BLOCKED -> READY when all hard_dependencies are DONE.",
+    "auto_block": "Move to BLOCKED if a hard dependency becomes invalidated/reopened.",
+    "done_guard": "DONE requires tests/review/evidence according to issue definition.",
+    "gate_guard": "Release A cannot close until all 15 gate issues are DONE/PASS."
+  },
+  "initial_parallel_queue": ["A1-001","A2-001","A2-005","A3-005","A5-001","A5-004","A6-001","A8-001","A9-001"],
+  "source_sha256": "91f720101294c36b8243cbead1c064d67f8d27f33dd52386f256a9102c8393aa",
+  "source_artifact": "AIDI-2.0.0-Current-Project-Import-Bundle-20260925.zip::release_a_tracker_package/aidi-release-a-gitea-manifest.json",
+  "shards": ["core-a0-a3","durable-a4-a7","install-a8-a10","recovery-a11-a12","gates"]
+}
