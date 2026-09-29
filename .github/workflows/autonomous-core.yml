@@ -129,6 +129,30 @@ jobs:
           fi
 
           pr="$(jq -r '.[0].number' <<<"$prs")"
+          linked_issue="$(gh pr view "$pr" --repo "$REPO" --json body --jq '.body' | grep -oE 'Closes #[0-9]+' | head -n1 | grep -oE '[0-9]+' || true)"
+          [[ -n "$linked_issue" ]] || {
+            echo "Automation PR #$pr has no Closes #N linkage; refusing recovery." >&2
+            echo "recovered=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          bot_issues="$(gh api --paginate "repos/$REPO/issues?state=open&sort=created&direction=asc&per_page=100" | \
+            jq -s '[.[][] | select((has("pull_request") | not) and .user.login == "github-actions[bot]")] | sort_by(.created_at)')"
+          oldest_issue="$(jq -r '.[0].number // empty' <<<"$bot_issues")"
+
+          if [[ -n "$oldest_issue" && "$oldest_issue" != "$linked_issue" ]]; then
+            echo "PR #$pr belongs to newer Issue #$linked_issue while older Issue #$oldest_issue is unresolved; superseding newer cycle."
+            gh pr comment "$pr" --repo "$REPO" --body "Superseded by older unresolved automation Issue #$oldest_issue. This PR was not merged; queue order is being restored by the native executor."
+            gh pr close "$pr" --repo "$REPO" --delete-branch
+            linked_state="$(gh issue view "$linked_issue" --repo "$REPO" --json state --jq '.state')"
+            if [[ "$linked_state" == "OPEN" ]]; then
+              gh issue comment "$linked_issue" --repo "$REPO" --body "Closed as superseded because older automation Issue #$oldest_issue remains unresolved. No product merge was performed from the superseded PR."
+              gh issue close "$linked_issue" --repo "$REPO" --reason "not planned"
+            fi
+            echo "recovered=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           head="$(gh pr view "$pr" --repo "$REPO" --json headRefName --jq '.headRefName')"
           sha="$(gh pr view "$pr" --repo "$REPO" --json headRefOid --jq '.headRefOid')"
 
@@ -222,9 +246,8 @@ jobs:
           set -euo pipefail
           prs="$(gh pr list --repo "$REPO" --state open --limit 100             --json headRefName,baseRefName |             jq '[.[] | select((.headRefName | startswith("automation/")) or .headRefName == "development")] | length')"
           runs="$(gh run list --repo "$REPO" --limit 100             --json databaseId,status |             jq --argjson current "$GITHUB_RUN_ID"               '[.[] | select((.status == "queued" or .status == "in_progress") and .databaseId != $current)] | length')"
-          orphan_json="$(gh issue list --repo "$REPO" --state open --limit 100 \
-            --json number,author,createdAt | \
-            jq '[.[] | select(.author.login == "github-actions[bot]")] | sort_by(.createdAt)')"
+          orphan_json="$(gh api --paginate "repos/$REPO/issues?state=open&sort=created&direction=asc&per_page=100" | \
+            jq -s '[.[][] | select((has("pull_request") | not) and .user.login == "github-actions[bot]")] | sort_by(.created_at)')"
           orphan_count="$(jq 'length' <<<"$orphan_json")"
           orphan_issue="$(jq -r '.[0].number // empty' <<<"$orphan_json")"
 
