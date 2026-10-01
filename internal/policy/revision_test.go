@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ControlCenterSoft/aidi_2.0/internal/canonical"
@@ -172,6 +173,126 @@ func TestNextPolicyRevision_RevisionExhausted(t *testing.T) {
 	_, err := policy.NextPolicyRevision(current, p, current.Revision)
 	if !errors.Is(err, canonical.ErrRevisionExhausted) {
 		t.Fatalf("expected ErrRevisionExhausted, got %v", err)
+	}
+}
+
+func TestEvaluateRevision_ReferencesExactRevision(t *testing.T) {
+	t.Parallel()
+
+	p := validPolicy("p1")
+	revision := policy.PolicyRevision{Policy: p, Revision: 1}
+
+	got, err := policy.EvaluateRevision(revision, "user:alice", "res:1", "read")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.Decision.Allowed {
+		t.Fatalf("expected Allowed=true, got false (reason=%q)", got.Decision.Reason)
+	}
+	if got.PolicyID != p.ID {
+		t.Fatalf("expected PolicyID %q, got %q", p.ID, got.PolicyID)
+	}
+	if got.Revision != revision.Revision {
+		t.Fatalf("expected Revision %d, got %d", revision.Revision, got.Revision)
+	}
+}
+
+func TestEvaluateRevision_SurvivesLaterRevisionChange(t *testing.T) {
+	t.Parallel()
+
+	p := validPolicy("p1")
+	original := policy.PolicyRevision{Policy: p, Revision: 1}
+
+	// A historical decision made against revision 1...
+	historical, err := policy.EvaluateRevision(original, "user:alice", "res:1", "read")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// ...must still reference revision 1 even after the policy advances to
+	// revision 2 with a contradictory statement.
+	next := policy.Policy{
+		ID: "p1",
+		Statements: []policy.Statement{
+			{Subject: "user:alice", Resource: "res:1", Action: "read", Effect: policy.EffectDeny},
+		},
+	}
+	if _, err := policy.NextPolicyRevision(original, next, 1); err != nil {
+		t.Fatalf("unexpected error advancing revision: %v", err)
+	}
+
+	if historical.Revision != 1 {
+		t.Fatalf("expected historical decision to still reference revision 1, got %d", historical.Revision)
+	}
+	if !historical.Decision.Allowed {
+		t.Fatalf("expected historical decision to remain Allowed=true despite later revision change")
+	}
+}
+
+func TestEvaluateRevision_DenyDecision(t *testing.T) {
+	t.Parallel()
+
+	p := policy.Policy{
+		ID: "p1",
+		Statements: []policy.Statement{
+			{Subject: "user:alice", Resource: "res:1", Action: "read", Effect: policy.EffectDeny},
+		},
+	}
+	revision := policy.PolicyRevision{Policy: p, Revision: 3}
+
+	got, err := policy.EvaluateRevision(revision, "user:alice", "res:1", "read")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Decision.Allowed {
+		t.Fatalf("expected Allowed=false, got true")
+	}
+	if strings.TrimSpace(got.Decision.Reason) == "" {
+		t.Fatalf("expected non-empty Reason for deny decision")
+	}
+	if got.Revision != 3 {
+		t.Fatalf("expected Revision 3, got %d", got.Revision)
+	}
+}
+
+func TestEvaluateRevision_InvalidRevision(t *testing.T) {
+	t.Parallel()
+
+	revision := policy.PolicyRevision{Policy: validPolicy("p1"), Revision: 0}
+	_, err := policy.EvaluateRevision(revision, "user:alice", "res:1", "read")
+	if err == nil {
+		t.Fatal("expected error for zero revision")
+	}
+	if !errors.Is(err, policy.ErrInvalidPolicyRevision) {
+		t.Fatalf("expected ErrInvalidPolicyRevision, got %v", err)
+	}
+}
+
+func TestEvaluateRevision_InvalidTuple(t *testing.T) {
+	t.Parallel()
+
+	revision := policy.PolicyRevision{Policy: validPolicy("p1"), Revision: 1}
+	_, err := policy.EvaluateRevision(revision, "", "res:1", "read")
+	if err == nil {
+		t.Fatal("expected error for empty subject")
+	}
+	if !errors.Is(err, policy.ErrInvalidTuple) {
+		t.Fatalf("expected ErrInvalidTuple, got %v", err)
+	}
+}
+
+func TestEvaluateRevision_Determinism(t *testing.T) {
+	t.Parallel()
+
+	revision := policy.PolicyRevision{Policy: validPolicy("p1"), Revision: 1}
+
+	got1, err1 := policy.EvaluateRevision(revision, "user:alice", "res:1", "read")
+	got2, err2 := policy.EvaluateRevision(revision, "user:alice", "res:1", "read")
+	if err1 != nil || err2 != nil {
+		t.Fatalf("unexpected errors: %v, %v", err1, err2)
+	}
+	if !reflect.DeepEqual(got1, got2) {
+		t.Fatalf("expected identical results, got %+v vs %+v", got1, got2)
 	}
 }
 
