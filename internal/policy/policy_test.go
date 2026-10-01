@@ -2,6 +2,7 @@ package policy
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -196,5 +197,153 @@ func TestPolicy_HasExplicitDeny_ZeroValueSafety(t *testing.T) {
 	var p Policy
 	if p.HasExplicitDeny("s", "r", "a") {
 		t.Fatalf("expected false for zero-value Policy")
+	}
+}
+
+func TestEvaluate_ExplicitDenyOverridesAllow(t *testing.T) {
+	p := Policy{
+		ID: "policy-1",
+		Statements: []Statement{
+			{Subject: "s", Resource: "r", Action: "a", Effect: EffectAllow},
+			{Subject: "s", Resource: "r", Action: "a", Effect: EffectDeny},
+		},
+	}
+	decision, err := Evaluate(p, "s", "r", "a")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if decision.Allowed {
+		t.Fatalf("expected Allowed=false, got true")
+	}
+	if strings.TrimSpace(decision.Reason) == "" {
+		t.Fatalf("expected non-empty Reason for explicit deny")
+	}
+}
+
+func TestEvaluate_AllowOnlyMatch(t *testing.T) {
+	p := Policy{
+		ID: "policy-1",
+		Statements: []Statement{
+			{Subject: "s", Resource: "r", Action: "a", Effect: EffectAllow},
+		},
+	}
+	decision, err := Evaluate(p, "s", "r", "a")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !decision.Allowed {
+		t.Fatalf("expected Allowed=true, got false (reason=%q)", decision.Reason)
+	}
+	if decision.Reason != "" {
+		t.Fatalf("expected empty Reason for allow decision, got %q", decision.Reason)
+	}
+}
+
+func TestEvaluate_DefaultDeny_NoMatchingStatement(t *testing.T) {
+	p := Policy{
+		ID: "policy-1",
+		Statements: []Statement{
+			{Subject: "other", Resource: "r", Action: "a", Effect: EffectAllow},
+		},
+	}
+	decision, err := Evaluate(p, "s", "r", "a")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if decision.Allowed {
+		t.Fatalf("expected Allowed=false, got true")
+	}
+	if strings.TrimSpace(decision.Reason) == "" {
+		t.Fatalf("expected non-empty Reason for default-deny")
+	}
+}
+
+func TestEvaluate_DenyOnlyMatch(t *testing.T) {
+	p := Policy{
+		ID: "policy-1",
+		Statements: []Statement{
+			{Subject: "s", Resource: "r", Action: "a", Effect: EffectDeny},
+		},
+	}
+	decision, err := Evaluate(p, "s", "r", "a")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if decision.Allowed {
+		t.Fatalf("expected Allowed=false, got true")
+	}
+	if strings.TrimSpace(decision.Reason) == "" {
+		t.Fatalf("expected non-empty Reason for deny decision")
+	}
+}
+
+func TestEvaluate_InvalidPolicy(t *testing.T) {
+	p := Policy{ID: "", Statements: []Statement{validStatement()}}
+	_, err := Evaluate(p, "s", "r", "a")
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !errors.Is(err, ErrInvalidPolicy) {
+		t.Fatalf("expected ErrInvalidPolicy, got %v", err)
+	}
+}
+
+func TestEvaluate_InvalidTuple(t *testing.T) {
+	p := Policy{
+		ID:         "policy-1",
+		Statements: []Statement{validStatement()},
+	}
+	cases := []struct {
+		name     string
+		subject  string
+		resource string
+		action   string
+	}{
+		{name: "empty subject", subject: "", resource: "r", action: "a"},
+		{name: "whitespace subject", subject: "   ", resource: "r", action: "a"},
+		{name: "empty resource", subject: "s", resource: "", action: "a"},
+		{name: "whitespace resource", subject: "s", resource: "   ", action: "a"},
+		{name: "empty action", subject: "s", resource: "r", action: ""},
+		{name: "whitespace action", subject: "s", resource: "r", action: "   "},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Evaluate(p, tc.subject, tc.resource, tc.action)
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !errors.Is(err, ErrInvalidTuple) {
+				t.Fatalf("expected ErrInvalidTuple, got %v", err)
+			}
+		})
+	}
+}
+
+func TestEvaluate_NeverPanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Evaluate panicked: %v", r)
+		}
+	}()
+	var zero Policy
+	if _, err := Evaluate(zero, "", "", ""); err == nil {
+		t.Fatalf("expected error for zero-value Policy and empty tuple")
+	}
+}
+
+func TestEvaluate_Deterministic(t *testing.T) {
+	p := Policy{
+		ID: "policy-1",
+		Statements: []Statement{
+			{Subject: "s", Resource: "r", Action: "a", Effect: EffectAllow},
+		},
+	}
+	first, err1 := Evaluate(p, "s", "r", "a")
+	second, err2 := Evaluate(p, "s", "r", "a")
+	if err1 != nil || err2 != nil {
+		t.Fatalf("unexpected errors: %v, %v", err1, err2)
+	}
+	if first != second {
+		t.Fatalf("expected identical Decision for identical inputs: %+v vs %+v", first, second)
 	}
 }
