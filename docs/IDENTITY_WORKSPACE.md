@@ -27,6 +27,10 @@ state-transition validation only:
   `ValidateLocalAdminTransition`/`RequireInitialized`/`BreakGlassEligible`
   contract for the mandatory local admin bootstrap and break-glass identity
   (SPEC §3.1) — see "Local Admin Bootstrap and Break-Glass" below.
+- `EnrollmentToken` and its `EnrollmentTokenID`/`EnrollmentTokenState`/
+  `ValidateEnrollmentTokenTransition`/`Redeem`/`Expire`/`IsExpired` contract
+  for the one-time Node Agent enrollment token (SPEC §10.2) — see
+  "Enrollment Token" below.
 
 There is no HTTP/API surface, no persistence and no external identity
 provider integration in this package. Concrete adapters (Local Identity, AD,
@@ -139,6 +143,58 @@ persistence or HTTP/API surface:
 Password hashing/verification, first-login enforcement wiring, and any HTTP/
 persistence integration remain later Release A/B work.
 
+## Enrollment Token
+
+Per SPEC §10.2 ("Enrollment: one-time token → cryptographic/mTLS machine
+identity"), `EnrollmentToken` models the one-time Node Agent enrollment
+token as a pure value type — no cryptographic generation/hashing,
+persistence or transport binding happens here, only the checkable lifecycle
+invariants every concrete adapter must uphold:
+
+- `EnrollmentTokenID` — an opaque reference to the issued token (for example
+  a stored hash or lookup key), mirroring the §15.3 Local Password Reset
+  Token pattern ("raw token not stored"): it is never the raw,
+  bearer-usable secret handed to the enrolling Node Agent.
+- `EnrollmentTokenState` — `PENDING` (freshly issued), `REDEEMED` (consumed
+  by a successful enrollment) or `EXPIRED`. Lifecycle:
+
+  ```
+  PENDING → REDEEMED | EXPIRED
+  ```
+
+  `PENDING` is the only non-terminal state; both `REDEEMED` and `EXPIRED`
+  are terminal — a redeemed token can never later be reported as expired,
+  and an expired token can never later be redeemed.
+  `ValidateEnrollmentTokenTransition` enforces this.
+- `EnrollmentToken.Validate()` enforces a valid `ID`, a known `State`, a
+  strictly bounded `IssuedAt`/`ExpiresAt` window (AC: "Enrollment token
+  expires"), and — when `State == REDEEMED` — a recorded `RedeemedAt` that
+  is not before `IssuedAt`, proving the redemption actually occurred rather
+  than being a state-only assertion.
+- `EnrollmentToken.IsExpired(now)` reports whether the validity window has
+  elapsed as of `now`, or the token is already `EXPIRED`. A `REDEEMED` token
+  is never reported as expired: redemption and expiry are mutually
+  exclusive terminal outcomes of the same `PENDING` token.
+- `Redeem(token, now)` consumes a token exactly once as part of a successful
+  enrollment (AC: "Enrollment token is single-use", "Token is unusable after
+  successful enrollment"). It fails closed with
+  `ErrEnrollmentTokenAlreadyRedeemed` if the token was already redeemed —
+  so a second enrollment attempt with the same token can never succeed —
+  and with `ErrEnrollmentTokenExpired` if the token is already `EXPIRED` or
+  `now` is at/after `ExpiresAt`, even if never previously redeemed.
+  Otherwise it returns a new `EnrollmentToken` in the `REDEEMED` state with
+  `RedeemedAt` set to `now`; it never mutates the input token.
+- `Expire(token, now)` transitions a lapsed `PENDING` token to `EXPIRED`
+  (idempotent once already `EXPIRED`). It rejects an already-`REDEEMED`
+  token with `ErrEnrollmentTokenAlreadyRedeemed` (redemption is a prior,
+  successful, terminal outcome) and rejects expiring a still-valid
+  `PENDING` token early with `ErrInvalidEnrollmentTokenTransition`.
+
+Concrete token minting/hashing, delivery, persistence, and the resulting
+`ServiceIdentity`/machine-identity issuance on successful enrollment
+(SPEC §10.2's "cryptographic/mTLS machine identity", tracked separately as
+Machine Identity) remain later Release A/B work.
+
 ## Evidence
 
 The package tests cover:
@@ -172,6 +228,27 @@ The package tests cover:
 - `BreakGlassEligible` returning `true` for a valid `ACTIVE` local admin
   account for both `externalIdPHealthy == true` and `== false`, and `false`
   for an uninitialized or otherwise invalid account (AC-ID-001, AC-ID-004).
+- valid/invalid `EnrollmentTokenID`/`EnrollmentTokenState` validation;
+- `EnrollmentToken.Validate()` for a well-formed `PENDING`/`EXPIRED` token
+  and every rejection case (invalid id, unknown state, zero/unbounded
+  lifetime, a `REDEEMED` token missing or predating its `RedeemedAt`);
+- `IsExpired` across a not-yet-expired `PENDING` token, a token exactly at
+  and past its `ExpiresAt`, an explicitly `EXPIRED` token, and a `REDEEMED`
+  token that remains never-expired even long past its original window;
+- every legal and illegal `EnrollmentTokenState` transition — only
+  `PENDING → REDEEMED` and `PENDING → EXPIRED` are legal; both terminal
+  states reject any further transition, including self-loops;
+- `Redeem` succeeding exactly once and then rejecting a second attempt on
+  the same (now `REDEEMED`) token with `ErrEnrollmentTokenAlreadyRedeemed`
+  (AC: single-use, "unusable after successful enrollment");
+- `Redeem` rejecting an already-lapsed or already-`EXPIRED` token with
+  `ErrEnrollmentTokenExpired` (AC: "Enrollment token expires"), and
+  rejecting a structurally invalid token outright;
+- `Expire` transitioning a lapsed `PENDING` token, idempotently no-op'ing on
+  an already-`EXPIRED` token, rejecting a `REDEEMED` token with
+  `ErrEnrollmentTokenAlreadyRedeemed`, and rejecting an early expiry attempt
+  on a still-valid `PENDING` token with
+  `ErrInvalidEnrollmentTokenTransition`.
 
 This package has no dependency on `net/http`, `database/sql`, NATS,
 Temporal, or any external identity provider — pure domain logic only,
