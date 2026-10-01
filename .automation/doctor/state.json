@@ -1,7 +1,7 @@
 {
-  "last_fingerprint": "",
-  "repeat_count": 0,
+  "last_fingerprint": "core_failure_without_durable_pr",
+  "repeat_count": 1,
   "circuit_open": false,
-  "last_outcome": "exact_head_ci_green",
-  "updated_at": "2026-10-01T22:16:46Z"
+  "last_outcome": "retry_failed_core_once",
+  "updated_at": "2026-10-01T22:40:28Z"
 }
