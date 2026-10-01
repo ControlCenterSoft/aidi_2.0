@@ -1,6 +1,0 @@
-{
-  "owner": "chatgpt-event-chain-doctor-20261001T154746Z",
-  "started_at": "2026-10-01T15:47:46Z",
-  "lease_until": "2026-10-01T15:51:30Z",
-  "task_role": "event_driven_scheduler_and_github_doctor_setup"
-}
