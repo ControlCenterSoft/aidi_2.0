@@ -67,6 +67,43 @@ This is purely additive: `TaskState` (`task.go`), `ChangeSetState`
 rule from the `State`/`StateSet` card (A1-003). Rewiring existing callers is
 reserved for a later card.
 
+## State transition validator
+
+`internal/canonical/transition.go` defines a single reusable, closed-graph
+"(current `State`) -> (next `State`)" contract, built purely on `State`/
+`StateSet` (`state.go`, A1-003):
+
+- `TransitionGraph` — a closed set of allowed `(current State) -> (next
+  State)` edges, expressed as a `map[State]StateSet` built with
+  `NewTransitionGraph(edges map[State]StateSet)`. A `State` mapped to an
+  empty `StateSet` (`NewStateSet()` with no arguments) is terminal: no
+  outgoing edge is allowed, not even a same-state no-op, unless the graph
+  explicitly declares that same-state edge. A `State` absent from the graph
+  entirely is outside the declared graph, and every edge into or out of it
+  is rejected.
+- `ValidateStateTransition(current, next State, graph TransitionGraph)
+  error` rejects any edge not present in `graph`, returning the single
+  exported sentinel `ErrInvalidStateTransition` (wrapped with `%w` for
+  `errors.Is`), naming both `current` and `next`, following the
+  `ErrInvalidKind`/`ErrInvalidID`/`ErrInvalidState`/`ErrInvalidReason`
+  naming convention. Named `ValidateStateTransition` (mirroring
+  `ValidateStateReason` from `reason.go`) rather than `ValidateTransition`
+  to avoid colliding with the existing, unrelated
+  `ValidateTransition(current, next ChangeSetState)` in `changeset.go`.
+
+This extracts the shared shape that `TaskState.ValidateTransition`
+(`task.go`), `ChangeSetState` (`changeset.go`),
+`specification.RequirementStatus`, `identity.InvitationState`, and
+`identity.LocalAdminAccountState` each hand-roll independently today as an
+identical `switch current { case ... }` edge check plus a bespoke
+`ErrInvalidXTransition` sentinel and terminal-state handling. This is purely
+additive: no existing caller (`TaskState`, `ChangeSetState`,
+`specification.RequirementStatus`, `identity.InvitationState`,
+`identity.LocalAdminAccountState`, or `orchestration` command transitions)
+is rewired onto `TransitionGraph`/`ValidateStateTransition` in this slice.
+Rewiring existing callers, and the domain invariant framework that depends
+on this primitive, are reserved for later cards.
+
 ## Event envelope
 
 Every persisted significant transition must be representable by a versioned canonical Event containing:
