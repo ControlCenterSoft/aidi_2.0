@@ -37,6 +37,36 @@ rewired to use it in this slice. It is the foundation later cards build on
 for state/reason separation, a generic transition-graph validator, and an
 invariant framework.
 
+## State/reason separation
+
+`internal/canonical/reason.go` defines a reusable "why a state holds"
+contract that builds purely on the `State`/`StateSet` contract above:
+
+- `Reason` — a `string`-based value distinct from `State`, recording *why* a
+  canonical state holds (e.g. a blocked/failure/rejection reason).
+  `Reason.IsEmpty()` treats an empty or whitespace-only value as "no reason
+  supplied".
+- `ErrInvalidReason` — the sentinel returned when a required `Reason` is
+  missing, following the `ErrInvalidKind`/`ErrInvalidID`/`ErrInvalidState`
+  naming convention.
+- `ValidateStateReason(state State, reason Reason, allowed StateSet,
+  reasonRequired StateSet) error` first validates `state` against `allowed`
+  (returning `ErrInvalidState` as before), then enforces the reason
+  requirement: a `Reason` is required (non-empty, non-whitespace-only) for
+  any `state` in the caller-supplied `reasonRequired` `StateSet`, returning
+  `ErrInvalidReason` (wrapped with `%w` for `errors.Is`) when missing.
+
+Explicit rule for this slice: a `Reason` is always optional *extra* context.
+Supplying one for a state outside `reasonRequired` is allowed, not rejected
+as strict surplus context — only a missing/empty `Reason` for a state that
+*is* in `reasonRequired` is an error.
+
+This is purely additive: `TaskState` (`task.go`), `ChangeSetState`
+(`changeset.go`) and `specification.RequirementStatus` are not rewired onto
+`Reason`/`ValidateStateReason` in this slice, mirroring the additive-only
+rule from the `State`/`StateSet` card (A1-003). Rewiring existing callers is
+reserved for a later card.
+
 ## Event envelope
 
 Every persisted significant transition must be representable by a versioned canonical Event containing:
