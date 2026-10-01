@@ -1,0 +1,9 @@
+{
+  "run_id": "36936450104",
+  "attempt": "1",
+  "fingerprint": "core_failure_without_durable_pr",
+  "outcome": "retry_failed_core_once",
+  "kick_core": true,
+  "circuit_open": false,
+  "observed_at": "2026-10-01T22:40:29Z"
+}
