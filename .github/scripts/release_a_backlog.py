@@ -24,6 +24,7 @@ EXPECTED_EDGES = 263
 EXPECTED_SOURCE_SHA256 = "91f720101294c36b8243cbead1c064d67f8d27f33dd52386f256a9102c8393aa"
 EXPECTED_INDEX_SHA256 = "eaa6b5d368142d886300b72b85e594188fe88551b19fa0b49ce8cc6b1c971f29"
 CANONICAL_MARKER = f"<!-- aidi-release-a-manifest: 1.0 sha256={EXPECTED_SOURCE_SHA256} -->"
+GITHUB_ONLY_BLOCKED_PATH = Path(".automation/backlog/release-a/github-only-blocked.txt")
 
 
 class BacklogError(RuntimeError):
@@ -177,6 +178,16 @@ def load_issue_registry(path: Path, by_key: dict[str, Card]) -> dict[str, dict]:
 
 def select_ready(cards: list[Card], registry: dict[str, dict]) -> dict:
     closed = {key for key, issue in registry.items() if issue.get("state") == "closed"}
+    blocked: set[str] = set()
+    if GITHUB_ONLY_BLOCKED_PATH.exists():
+        blocked = {
+            line.strip().split("\t", 1)[0]
+            for line in GITHUB_ONLY_BLOCKED_PATH.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+    unknown_blocked = sorted(blocked - set(registry))
+    if unknown_blocked:
+        raise BacklogError(f"github-only blocklist contains unknown keys: {unknown_blocked}")
 
     ready: list[Card] = []
     for card in cards:
@@ -184,6 +195,8 @@ def select_ready(cards: list[Card], registry: dict[str, dict]) -> dict:
             continue
         issue = registry[card.key]
         if issue.get("state") != "open":
+            continue
+        if card.key in blocked:
             continue
         if all(dep in closed for dep in card.dependencies):
             ready.append(card)
@@ -197,6 +210,7 @@ def select_ready(cards: list[Card], registry: dict[str, dict]) -> dict:
             "implementation_complete": implementation_done,
             "closed_count": len(closed),
             "total_count": len(cards),
+            "github_only_blocked": sorted(blocked),
         }
 
     card = min(ready, key=lambda c: c.order)
@@ -209,6 +223,7 @@ def select_ready(cards: list[Card], registry: dict[str, dict]) -> dict:
         "dependencies": list(card.dependencies),
         "closed_count": len(closed),
         "total_count": len(cards),
+        "github_only_blocked": sorted(blocked),
     }
 
 
