@@ -1,0 +1,42 @@
+name: AIDI GitHub Doctor
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0,30 * * * *"
+  push:
+    branches:
+      - automation-control
+    paths:
+      - '.automation/doctor-kicks/*.trigger'
+
+permissions:
+  actions: write
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: aidi-github-doctor
+  cancel-in-progress: false
+
+jobs:
+  doctor:
+    if: github.repository == 'ControlCenterSoft/aidi_2.0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+
+    steps:
+      - name: Checkout automation controller
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Run GitHub Doctor
+        shell: bash
+        run: bash .github/scripts/github-doctor.sh
