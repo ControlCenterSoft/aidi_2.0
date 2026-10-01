@@ -163,6 +163,16 @@ generic entry point enforcing this rule: a mismatched expected revision is
 rejected before the mutation runs, and the revision only advances, by
 exactly one, once the mutation itself succeeds.
 
+At the storage boundary (`internal/repository`, A2-003), `Repository.Save`
+enforces the same rule against whatever is actually stored, and
+`repository.Update[T]` (A2-004, see `docs/REPOSITORY_BOUNDARY.md`) composes
+that boundary with a `Codec[T]` to give a single typed load/mutate/save
+entry point: a stale `expectedRevision` is rejected with a
+`*canonical.RevisionConflictError` before any decode/mutate/encode runs,
+and `Repository.Save` independently re-checks the same expected revision
+against the live store, so a concurrent writer that commits in between is
+still rejected and never overwritten.
+
 ## Boundary
 
 This slice defines domain contracts only. PostgreSQL transactions, Transactional Outbox, Inbox/dedup, event publication, NATS JetStream, and durable workflow integration are separate Release A slices.
