@@ -2,6 +2,8 @@ name: AIDI GitHub Doctor
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0,30 * * * *"
   push:
     branches:
       - automation-control
@@ -32,7 +34,7 @@ jobs:
       - name: Checkout automation controller
         uses: actions/checkout@v4
         with:
-          ref: automation-control
+          ref: main
           fetch-depth: 1
 
       - name: Run GitHub Doctor
