@@ -1,6 +1,0 @@
-{
-  "owner": "chatgpt-dispatch-chain-20261001T181300Z",
-  "started_at": "2026-10-01T18:13:00Z",
-  "lease_until": "2026-10-01T18:17:00Z",
-  "task_role": "replace_self_push_with_workflow_dispatch_and_resume"
-}
