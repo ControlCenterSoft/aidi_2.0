@@ -1,0 +1,12 @@
+{
+  "owner": "core-36939145258",
+  "completed_at": "2026-10-01T23:16:13Z",
+  "issue": 96,
+  "pull_request": 183,
+  "main_sha": "cefa11faf972e7bdee45a0eb2d28452072396fc1",
+  "ci": {
+    "pull_request_run": 36939531496,
+    "main_push_run": 36939667131,
+    "development_push_run": 36939771441
+  }
+}
