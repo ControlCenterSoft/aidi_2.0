@@ -6,21 +6,25 @@
 // slice there was no domain type at all representing a Policy as a
 // first-class canonical entity.
 //
-// This package defines pure domain types and invariants only: a PolicyID
+// This package defines pure domain types and invariants: a PolicyID
 // identifier (aligned with internal/canonical identifier conventions), a
 // closed-set Effect (ALLOW/DENY), a Subject/Resource/Action/Effect
-// Statement tuple, and a Policy aggregate (an ordered list of Statements)
-// with a Validate method. Validate rejects malformed input; it does not
-// resolve ALLOW/DENY conflicts between Statements. Policy additionally
-// exposes HasExplicitDeny so a later evaluator can implement "explicit
-// deny overrides allow" (SPEC §12.1) without re-deriving tuple matching.
+// Statement tuple, a Policy aggregate (an ordered list of Statements)
+// with a Validate method, and a pure Evaluate function (backlog A5-002)
+// that resolves the ALLOW/DENY Decision for a (Subject, Resource, Action)
+// tuple against a Policy's ordered Statements, implementing "explicit
+// deny overrides allow" (SPEC §12.1) and default-deny when no Statement
+// matches. Policy.Validate rejects malformed input; it does not resolve
+// ALLOW/DENY conflicts between Statements — that is Evaluate's job.
+// Policy also exposes HasExplicitDeny, which Evaluate uses internally so
+// callers needing just the deny check need not re-derive tuple matching.
 //
-// This package deliberately excludes policy evaluation/decisioning
-// (backlog A5-002), revision/versioning persistence (A5-003), the
-// Authorization→Policy→Execution pipeline (A5-005), and any HTTP/
-// persistence/queue wiring. No file in this package imports net/http,
-// database/sql, NATS, Temporal, or any VM/runner/queue package, and the
-// package introduces no new external module dependency, mirroring
+// This package deliberately excludes policy revision/versioning
+// persistence (backlog A5-003), the Authorization→Policy→Execution
+// pipeline (A5-005), wildcard/glob matching beyond exact tuple equality,
+// and any HTTP/persistence/queue wiring. No file in this package imports
+// net/http, database/sql, NATS, Temporal, or any VM/runner/queue package,
+// and the package introduces no new external module dependency, mirroring
 // internal/authorization and internal/toolregistry.
 package policy
 
@@ -138,8 +142,9 @@ func (p Policy) Validate() error {
 // HasExplicitDeny reports whether p contains a DENY Statement for the
 // exact (subject, resource, action) tuple. It is deterministic, performs
 // no I/O, and never panics on a zero-value Policy (it returns false).
-// Callers (a later A5-002 evaluator) can use it to implement "explicit
-// deny overrides allow" (SPEC §12.1) without re-deriving tuple matching.
+// Callers (the A5-002 Evaluate function below) can use it to implement
+// "explicit deny overrides allow" (SPEC §12.1) without re-deriving tuple
+// matching.
 func (p Policy) HasExplicitDeny(subject, resource, action string) bool {
 	for _, stmt := range p.Statements {
 		if stmt.Effect == EffectDeny &&
@@ -150,4 +155,71 @@ func (p Policy) HasExplicitDeny(subject, resource, action string) bool {
 		}
 	}
 	return false
+}
+
+// Decision is the deterministic outcome of evaluating a Policy against a
+// (Subject, Resource, Action) tuple (SPEC §12.1, backlog A5-002). Reason
+// is non-empty whenever Allowed is false, explaining why the tuple was
+// denied (explicit DENY statement, or no matching statement at all).
+type Decision struct {
+	Allowed bool   `json:"allowed"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+// ErrInvalidTuple is returned (wrapped) by Evaluate when subject, resource,
+// or action is empty/whitespace-only.
+var ErrInvalidTuple = errors.New("policy: invalid tuple")
+
+// Evaluate resolves the ALLOW/DENY Decision for the (subject, resource,
+// action) tuple against policy's ordered Statements, per SPEC §12.1 ("RBAC
+// дополняется policy engine; explicit deny overrides allow"):
+//
+//   - If any Statement matching the exact tuple has Effect == EffectDeny,
+//     the result is Allowed: false with a non-empty Reason, regardless of
+//     any matching ALLOW statement (explicit deny overrides allow).
+//   - Else if at least one Statement matching the exact tuple has
+//     Effect == EffectAllow, the result is Allowed: true.
+//   - Else (no Statement matches the tuple), the result is a default-deny:
+//     Allowed: false with a Reason explaining no matching statement was
+//     found.
+//
+// Evaluate rejects an invalid policy (via Policy.Validate()) and an empty
+// subject/resource/action with a wrapped sentinel error
+// (ErrInvalidPolicy or ErrInvalidTuple) and never panics. It is a pure
+// function: no I/O, no clock, no global/singleton state — identical
+// inputs always produce an identical Decision.
+func Evaluate(policy Policy, subject, resource, action string) (Decision, error) {
+	if err := policy.Validate(); err != nil {
+		return Decision{}, err
+	}
+	if strings.TrimSpace(subject) == "" {
+		return Decision{}, fmt.Errorf("%w: subject is required", ErrInvalidTuple)
+	}
+	if strings.TrimSpace(resource) == "" {
+		return Decision{}, fmt.Errorf("%w: resource is required", ErrInvalidTuple)
+	}
+	if strings.TrimSpace(action) == "" {
+		return Decision{}, fmt.Errorf("%w: action is required", ErrInvalidTuple)
+	}
+
+	if policy.HasExplicitDeny(subject, resource, action) {
+		return Decision{
+			Allowed: false,
+			Reason:  fmt.Sprintf("explicit deny for subject %q, resource %q, action %q", subject, resource, action),
+		}, nil
+	}
+
+	for _, stmt := range policy.Statements {
+		if stmt.Effect == EffectAllow &&
+			stmt.Subject == subject &&
+			stmt.Resource == resource &&
+			stmt.Action == action {
+			return Decision{Allowed: true}, nil
+		}
+	}
+
+	return Decision{
+		Allowed: false,
+		Reason:  fmt.Sprintf("no matching statement for subject %q, resource %q, action %q", subject, resource, action),
+	}, nil
 }
