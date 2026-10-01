@@ -24,10 +24,45 @@ concurrency, structured errors и rate limits" — closing the Query side of
 that contract now that the Command side (`internal/apicommand`) and the
 structured error side (`internal/apierror`) already exist.
 
+## Pagination
+
+`Query.Page` is an optional field (nil for non-list operations) describing
+the caller-supplied pagination request for a list-shaped query:
+
+Types:
+- `Page.Limit` (`uint32`): the maximum number of items a single page may
+  return. Must be non-zero and must not exceed `MaxPageLimit` (500).
+- `Page.Cursor` (`string`): an opaque, optional token identifying where to
+  resume from. Empty means "first page". This contract defines no
+  encoding/decoding scheme for the cursor value — that is left to a later
+  Release A/B slice that wires pagination into a concrete read-model.
+- `PageResult.NextCursor` (`string`): the opaque token to pass as the next
+  `Page.Cursor`. Empty when there is no further page.
+- `PageResult.HasMore` (`bool`): whether another page is available.
+
+Validation rules:
+- `Page.Validate()` rejects `Limit == 0` and `Limit > MaxPageLimit`; both
+  empty and non-empty `Cursor` are accepted.
+- `PageResult.Validate()` enforces the `HasMore`/`NextCursor` invariant:
+  `HasMore == true` requires a non-empty `NextCursor`; `HasMore == false`
+  requires an empty `NextCursor`.
+- `Query.Validate()` validates `Page` when present (wrapping
+  `ErrInvalidQuery` on failure, mirroring `Target.Validate`); a `nil` `Page`
+  leaves `Query.Validate()` unaffected, so existing queries without
+  pagination are unchanged.
+
+Scope boundary: this is a pure Go domain contract only. No HTTP/REST
+routing, no OpenAPI schema, no persistence/read-model execution, no cursor
+encoding/decoding scheme, and no wiring into `apicommand`, `apierror`, or
+`apiratelimit` — those remain later Release A/B slices.
+
 Out of scope for this slice (left to later Release A/B slices): HTTP/REST
-routing, OpenAPI schema, persistence/read-model execution, pagination/rate-limit
+routing, OpenAPI schema, persistence/read-model execution, rate-limit
 enforcement, and query-result projection shape.
 
 Tests cover the valid query and every required invariant (query id,
 correlation id, target kind, target id, operation), plus that `parameters`
-may be absent.
+may be absent. Pagination tests cover valid/invalid `Page` (zero limit,
+over-max limit, with/without cursor), valid/invalid `PageResult` (the
+`HasMore`/`NextCursor` boundary cases), and `Query.Validate()` with a `nil`
+Page, a valid Page, and an invalid Page.
