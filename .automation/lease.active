@@ -1,6 +1,0 @@
-{
-  "owner": "chatgpt-self-approval-gate-20261001T165504Z",
-  "started_at": "2026-10-01T16:55:04Z",
-  "lease_until": "2026-10-01T16:59:04Z",
-  "task_role": "configure_autonomous_core_self_approval_gate"
-}
