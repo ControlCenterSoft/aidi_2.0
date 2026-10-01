@@ -10,9 +10,40 @@ fingerprint=""
 outcome="noop"
 lease_acquired=false
 
+lease_endpoint="repos/$REPO/contents/.automation/lease.active?ref=automation-control"
+now_epoch="$(date -u +%s)"
+
+# Doctor may heal a lease left behind by a cancelled/aborted Core run.
+if current_lease="$(gh api "$lease_endpoint" 2>/dev/null)"; then
+  lease_sha="$(jq -r '.sha' <<<"$current_lease")"
+  lease_body="$(jq -r '.content' <<<"$current_lease" | base64 -d)"
+  existing_owner="$(jq -r '.owner // empty' <<<"$lease_body")"
+  lease_until="$(jq -r '.lease_until // empty' <<<"$lease_body")"
+  owner_run="${existing_owner##*-}"
+  owner_active=false
+  if [[ "$owner_run" =~ ^[0-9]+$ ]]; then
+    owner_status="$(gh api "repos/$REPO/actions/runs/$owner_run" --jq '.status' 2>/dev/null || true)"
+    if [[ "$owner_status" == "queued" || "$owner_status" == "in_progress" ]]; then
+      owner_active=true
+    fi
+  elif [[ -n "$lease_until" ]]; then
+    lease_epoch="$(date -u -d "$lease_until" +%s 2>/dev/null || echo 0)"
+    (( lease_epoch > now_epoch )) && owner_active=true
+  fi
+
+  if [[ "$owner_active" == "true" ]]; then
+    exit 0
+  fi
+
+  gh api --method DELETE "$lease_endpoint" \
+    -f message="chore(automation): doctor removes stale lease" \
+    -f sha="$lease_sha" \
+    -f branch="automation-control" >/dev/null
+fi
+
 lease_json="$(jq -n --arg owner "$LEASE_OWNER" --arg started "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg until "$(date -u -d '+4 minutes' +%Y-%m-%dT%H:%M:%SZ)" '{owner:$owner,started_at:$started,lease_until:$until,task_role:"AIDI GitHub Doctor"}')"
 lease_encoded="$(printf '%s\n' "$lease_json" | base64 -w0)"
-if gh api --method PUT "repos/$REPO/contents/.automation/lease.active" -f message="chore(automation): acquire $LEASE_OWNER lease" -f content="$lease_encoded" -f branch="automation-control" >/dev/null 2>&1; then
+if gh api --method PUT "$lease_endpoint" -f message="chore(automation): acquire $LEASE_OWNER lease" -f content="$lease_encoded" -f branch="automation-control" >/dev/null 2>&1; then
   lease_acquired=true
 else
   exit 0
@@ -55,16 +86,38 @@ update_circuit() {
   printf '%s' "$circuit"
 }
 
+record_observation() {
+  local circuit="$1"
+  local attempt="${GITHUB_RUN_ATTEMPT:-1}"
+  local path=".automation/doctor/history/${CURRENT}-${attempt}.json"
+  local observation encoded
+  observation="$(jq -n \
+    --arg run "$CURRENT" \
+    --arg attempt "$attempt" \
+    --arg fingerprint "$fingerprint" \
+    --arg outcome "$outcome" \
+    --argjson kick "$kick" \
+    --argjson circuit "$circuit" \
+    --arg observed "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{run_id:$run,attempt:$attempt,fingerprint:$fingerprint,outcome:$outcome,kick_core:$kick,circuit_open:$circuit,observed_at:$observed}')"
+  encoded="$(printf '%s\n' "$observation" | base64 -w0)"
+  gh api --method PUT "repos/$REPO/contents/$path" \
+    -f message="chore(automation): record GitHub Doctor observation $CURRENT/$attempt" \
+    -f content="$encoded" \
+    -f branch="automation-control" >/dev/null 2>&1 || true
+}
+
 emit() {
   echo "kick_core=$kick" >> "$OUT"
   echo "fingerprint=$fingerprint" >> "$OUT"
   echo "outcome=$outcome" >> "$OUT"
   circuit="$(update_circuit)"
+  record_observation "$circuit"
   release_lease
   if [[ "$kick" == "true" && "$circuit" != "true" ]]; then
     # Resume the authoritative product executor explicitly. A self-push made
     # with GITHUB_TOKEN would be recursion-suppressed by GitHub Actions.
-    gh workflow run autonomous-core.yml --repo "$REPO" --ref automation-control
+    gh workflow run autonomous-core.yml --repo "$REPO" --ref main
     echo "Queued Autonomous Core via workflow_dispatch after Doctor recovery."
   fi
 }
@@ -151,8 +204,8 @@ if [[ "$count" -eq 1 ]]; then
   exit 0
 fi
 
-issues="$(gh issue list --repo "$REPO" --state open --limit 100 --json number,author |
-  jq '[.[] | select(.author.login=="github-actions[bot]")]')"
+issues="$(gh api --paginate "repos/$REPO/issues?state=open&per_page=100" | \
+  jq -s '[.[][] | select(has("pull_request") | not) | select(.user.login=="github-actions[bot]" or ((.body // "") | contains("aidi-release-a-manifest:")))] | map({number:.number})')"
 branches="$(gh api --paginate --slurp "repos/$REPO/branches?per_page=100" | jq 'add')"
 candidate_issue=""
 candidate_branch=""
@@ -192,7 +245,33 @@ if [[ "$candidate_count" -gt 1 ]]; then
   exit 0
 fi
 
+latest_core="$(gh run list --repo "$REPO" --workflow autonomous-core.yml --limit 1 --json databaseId,status,conclusion,createdAt | jq '.[0] // {}')"
+latest_status="$(jq -r '.status // empty' <<<"$latest_core")"
+latest_conclusion="$(jq -r '.conclusion // empty' <<<"$latest_core")"
+latest_created="$(jq -r '.createdAt // empty' <<<"$latest_core")"
+
+if [[ "$latest_status" == "queued" || "$latest_status" == "in_progress" ]]; then
+  outcome="core_active"
+  emit
+  exit 0
+fi
+
+if [[ "$latest_conclusion" == "success" && -n "$latest_created" ]]; then
+  created_epoch="$(date -u -d "$latest_created" +%s 2>/dev/null || echo 0)"
+  age=$(( $(date -u +%s) - created_epoch ))
+  if (( age >= 0 && age < 1200 )); then
+    outcome="healthy_recent_core"
+    emit
+    exit 0
+  fi
+fi
+
 kick=true
-fingerprint="core_failure_without_durable_pr"
-outcome="retry_core_once"
+if [[ -n "$latest_conclusion" && "$latest_conclusion" != "success" ]]; then
+  fingerprint="core_${latest_conclusion}_without_durable_pr"
+  outcome="retry_failed_core_once"
+else
+  fingerprint="core_stale_without_durable_pr"
+  outcome="watchdog_resume_stale_core"
+fi
 emit
