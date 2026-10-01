@@ -2,6 +2,18 @@
 
 Source: approved AIDI v2.0.0 SPEC §4.2.
 
+## Unified identifier model
+
+Source: approved AIDI v2.0.0 SPEC §4.1.
+
+`internal/canonical/identifier.go` defines the single canonical identifier/entity-kind contract shared by every domain object:
+
+- `Kind` — a closed, typed enumeration restricted exactly to the SPEC §4.1 entity hierarchy: Installation, Identity/User, Workspace, Project, Specification, Requirement, Release, Feature, Task, Workflow, Attempt, ChangeSet, Verification, Evidence, Artifact, Decision, Approval, Risk, ChangeRequest, Problem, RecoveryCase, Policy, Resource, Event/Audit, OperationalKnowledge. `Kind.Validate()` rejects both empty and any value outside this set — no invented entity kinds are recognized.
+- `ID` — the canonical identifier type shared by all domain objects that reference an entity. `ID.Validate()` rejects empty/whitespace-only identifiers.
+- `ObjectRef{Kind, ID}` — the single canonical Kind/ID reference used across the codebase (e.g. `Event.Object`, `ChangeSet.Target`), replacing the previously duplicated, free-form `Kind string` object-reference shapes.
+
+`Event` and `ChangeSet` validation now delegates to this shared `Kind`/`ID`/`ObjectRef` contract while preserving their existing JSON field names and public behavior. This is a pure domain/Go contract: it introduces no PostgreSQL, NATS, Temporal, HTTP, or runner/VM/queue infrastructure.
+
 ## Event envelope
 
 Every persisted significant transition must be representable by a versioned canonical Event containing:
