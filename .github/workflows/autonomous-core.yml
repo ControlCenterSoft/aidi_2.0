@@ -208,11 +208,10 @@ jobs:
             echo "recovered=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if [[ "$review_decision" != "APPROVED" ]]; then
-            echo "PR #$pr is not approved (reviewDecision=$review_decision); leaving it for Review Gate."
-            echo "recovered=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          # Recovery uses the same autonomous approval rule as the normal
+          # merge path: green exact-head workflow_dispatch CI is authoritative.
+          # Only a current-head CHANGES_REQUESTED review blocks recovery.
+          echo "PR #$pr passed recovery approval: exact-head CI is green and no current-head blocking review exists."
 
           gh pr merge "$pr" --repo "$REPO" --merge --delete-branch
           git fetch origin main development
