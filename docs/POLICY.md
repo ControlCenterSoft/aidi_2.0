@@ -122,22 +122,52 @@ inputs always produce an identical `Decision` (mirrors the existing
 `authorization.Evaluate` / `apiratelimit.Evaluate` pattern already in this
 codebase).
 
-Matching beyond exact tuple equality (wildcards/globs), policy
-revision/versioning persistence (`A5-003`), and the
-Authorization→Policy→Execution pipeline (`A5-005`) remain out of scope
-for `Evaluate`.
+Matching beyond exact tuple equality (wildcards/globs) and policy
+revision/versioning persistence (`A5-003`) remain out of scope for
+`Evaluate`.
+
+## Authorization → Policy → Execution pipeline (`A5-005`)
+
+`internal/authzpipeline.Authorize(registry *toolregistry.Registry, req authzpipeline.Request) (authzpipeline.Decision, error)`
+composes this package's `Evaluate` with
+`internal/authorization.Evaluate` and `internal/toolregistry.Registry.Get`
+into a single deterministic pre-execution gate, with a fixed precedence
+order:
+
+1. **RBAC denial** (`internal/authorization.Evaluate`) short-circuits
+   first: if the `Role` does not hold the `Capability`, the policy and
+   tool are not evaluated at all.
+2. **Explicit policy `DENY`**, then
+3. **policy default-deny** (no matching statement) — both resolved by
+   this package's `Evaluate`, unchanged.
+4. **Non-ACTIVE or unregistered tool**: the `ToolID` must resolve to a
+   registered `Tool` with `Status == toolregistry.StatusActive`.
+
+The request is allowed only when RBAC allows **and** policy allows **and**
+the tool is `StatusActive`. Every denial carries a non-empty,
+distinguishable `Reason` identifying which stage denied the request (SPEC
+§2.4). `Authorize` is a pure function (no I/O, clock, goroutines, or
+global/singleton state); a malformed `Role`, `Capability`, `Policy`,
+tuple, or `ToolID` returns a wrapped sentinel error, never a panic. See
+`internal/authzpipeline`'s package doc for the full contract.
+
+`internal/policy.Evaluate`/`Policy`/`Decision` are unchanged by A5-005:
+`authzpipeline` only composes the existing contracts, it does not modify
+this package's public API.
 
 ## Scope boundary
 
 This slice deliberately excludes: policy revision/versioning persistence
-(`A5-003`), the Authorization→Policy→Execution pipeline (`A5-005`),
-wildcard/glob matching beyond exact tuple equality, and any HTTP/
-persistence/queue wiring. No file in `internal/policy` imports
-`net/http`, `database/sql`, NATS, Temporal, or any VM/runner/queue
-package, and the package introduces no new external module dependency.
+(`A5-003`), wildcard/glob matching beyond exact tuple equality, a
+persisted audit trail, `SUPER_ADMIN` global-role handling, and any HTTP/
+persistence/queue wiring. No file in `internal/policy` or
+`internal/authzpipeline` imports `net/http`, `database/sql`, NATS,
+Temporal, or any VM/runner/queue package, and neither package introduces
+any new external module dependency.
 
-Existing packages are unchanged: `A5-002` is additive to `internal/policy`
-only.
+Existing packages are unchanged: `A5-005`'s `internal/authzpipeline` is a
+new, additive package only; it does not change `internal/policy`,
+`internal/authorization`, or `internal/toolregistry` public APIs.
 
 ## Evidence
 
@@ -157,3 +187,14 @@ identical `Decision`).
 
 `gofmt -l .`, `go vet ./...`, and `go test -race ./...` pass clean
 repo-wide with no regression to existing packages.
+
+`internal/authzpipeline/authzpipeline_test.go` covers (`A5-005`): every
+precedence branch (RBAC allow+policy allow+tool active ⇒ allow; RBAC deny
+short-circuiting before policy/tool evaluation; explicit policy deny
+overriding a matching allow; policy default-deny; unregistered tool;
+`DEPRECATED`/`DISABLED` non-active tool status), every error branch
+(invalid `Role`, invalid/unknown `Capability`, invalid `Policy`, invalid
+tuple, invalid/empty `ToolID`), a nil-`Registry` safety case, and
+determinism (identical inputs across repeated calls produce an identical
+`Decision`). `go test ./internal/authzpipeline/... -cover` reports 100%
+statement coverage.
