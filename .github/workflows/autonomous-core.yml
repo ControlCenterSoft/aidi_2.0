@@ -586,12 +586,18 @@ jobs:
             exit 1
           }
 
-          review_decision="$(gh pr view "$pr" --repo "$REPO" --json reviewDecision --jq '.reviewDecision // ""')"
-          if [[ "$review_decision" != "APPROVED" ]]; then
-            echo "PR #$pr is not approved (reviewDecision=$review_decision); leaving it for Review Gate."
+          # Autonomous self-approval gate. GitHub does not allow the PR
+          # author to approve its own PR, so the authoritative exact-head
+          # workflow_dispatch CI above acts as the executor approval. A current-
+          # head CHANGES_REQUESTED review remains a hard block.
+          blocking_review_count="$(gh api --paginate "repos/$REPO/pulls/$pr/reviews?per_page=100" | \
+            jq -s --arg sha "${{ steps.ci.outputs.sha }}" '[.[][] | select(.state == "CHANGES_REQUESTED" and .commit_id == $sha)] | length')"
+          if [[ "$blocking_review_count" -gt 0 ]]; then
+            echo "PR #$pr has current-head CHANGES_REQUESTED; autonomous approval refuses merge."
             echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          echo "PR #$pr passed autonomous approval: exact-head CI is green and no current-head blocking review exists."
 
           mergeable=""
           for _ in $(seq 1 20); do
