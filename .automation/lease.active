@@ -1,6 +1,0 @@
-{
-  "owner": "chatgpt-scheduler-resume-20261001T1528Z",
-  "started_at": "2026-10-01T15:28:00Z",
-  "lease_until": "2026-10-01T15:32:00Z",
-  "task_role": "scheduler_resume_kick"
-}
