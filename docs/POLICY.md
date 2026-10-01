@@ -5,7 +5,9 @@ Status: **IN DEVELOPMENT**
 > This document covers three additive slices: `A5-001` (the `Policy`
 > domain types and validation), `A5-002` (the `Evaluate` ALLOW/DENY
 > decision function), and `A5-003` (the `PolicyRevision`
-> revision/versioning domain contract). All three live in
+> revision/versioning domain contract, plus `HistoricalDecision`/
+> `EvaluateRevision` so a historical decision can reference the exact
+> policy revision it was evaluated against). All three live in
 > `internal/policy`.
 
 SPEC §4.1 lists the canonical entity hierarchy as `Installation →
@@ -173,6 +175,38 @@ matching the `internal/repository` convention. `NextPolicyRevision` is a
 pure function: no I/O, no clock, no global/singleton state — identical
 inputs always produce an identical result.
 
+### Historical decisions reference an exact policy revision
+
+`A5-003`'s acceptance criterion is "historical decision can reference
+exact policy revision". This is satisfied by:
+
+```go
+type HistoricalDecision struct {
+    Decision Decision
+    PolicyID PolicyID
+    Revision canonical.Revision
+}
+
+func EvaluateRevision(revision PolicyRevision, subject, resource, action string) (HistoricalDecision, error)
+```
+
+`EvaluateRevision` validates `revision` (via `PolicyRevision.Validate()`,
+wrapped `ErrInvalidPolicyRevision`), resolves the `Decision` via the
+unchanged `Evaluate(revision.Policy, subject, resource, action)` (`A5-002`
+is not modified), and returns it wrapped in a `HistoricalDecision` that
+pins the exact `PolicyID` and `Revision` evaluated. Once produced, a
+`HistoricalDecision`'s `Revision` field never changes even if the
+underlying `Policy` is later advanced via `NextPolicyRevision`: the
+decision remains traceable to the precise policy snapshot that produced
+it, not merely to the `PolicyID`. `EvaluateRevision` never panics and is a
+pure function: no I/O, no clock, no global/singleton state — identical
+inputs always produce an identical `HistoricalDecision`.
+
+`HistoricalDecision` is itself a pure domain value: no persistence, no
+HTTP, no queue/VM/runner wiring. Persisting a `HistoricalDecision` (e.g.
+alongside a first-class `Decision` canonical entity per SPEC §4.1) is
+left to a later, separate card.
+
 No file in `internal/policy` imports `net/http`, `database/sql`, or any
 queue/workflow runtime package, and this slice introduces no new
 `go.mod` dependency; `internal/policy`'s only internal dependency beyond
@@ -212,8 +246,9 @@ this package's public API.
 This slice deliberately excludes: policy revision/versioning
 *persistence* (an actual storage adapter, revision history
 retrieval/listing, and HTTP/API exposure — left to later, separate
-cards; the `A5-003` pure domain contract itself is implemented, see
-above), wildcard/glob matching beyond exact tuple equality, a
+cards; the `A5-003` pure domain contract, including `HistoricalDecision`/
+`EvaluateRevision` referencing an exact policy revision, is implemented,
+see above), wildcard/glob matching beyond exact tuple equality, a
 persisted audit trail, `SUPER_ADMIN` global-role handling, and any HTTP/
 persistence/queue wiring. No file in `internal/policy` or
 `internal/authzpipeline` imports `net/http`, `database/sql`, NATS,
@@ -250,7 +285,19 @@ stale `expected` revision (via the wrapped
 with no mutation of `current`; rejection of an invalid `next` `Policy`
 (via `ErrInvalidPolicy`); revision exhaustion (via
 `canonical.ErrRevisionExhausted`); and determinism (identical inputs
-produce an identical result, no I/O/clock/global state). `go test
+produce an identical result, no I/O/clock/global state).
+
+`internal/policy/revision_test.go` additionally covers `EvaluateRevision`/
+`HistoricalDecision` (`A5-003` acceptance criterion): a `HistoricalDecision`
+correctly references the exact `PolicyID`/`Revision` it was evaluated
+against; a `HistoricalDecision` continues to reference its original
+`Revision` even after the underlying `Policy` is advanced via
+`NextPolicyRevision` to a revision with a contradictory statement
+(proving the historical reference survives later policy changes); an
+ALLOW and a DENY outcome each carrying the correct `Revision`; rejection
+of an invalid `PolicyRevision` (via `ErrInvalidPolicyRevision`) and an
+invalid tuple (via `ErrInvalidTuple`); and determinism (identical inputs
+produce an identical `HistoricalDecision`). `go test
 ./internal/policy/... -cover` reports 100% statement coverage.
 
 `gofmt -l .`, `go vet ./...`, and `go test -race ./...` pass clean
