@@ -8,7 +8,8 @@ on:
     paths:
       - '.automation/kicks/*.trigger'
   schedule:
-    - cron: "5,15,25,35,45,55 * * * *"
+    # Watchdog only; normal progression is event-driven task -> task.
+    - cron: "17 * * * *"
 
 permissions:
   actions: write
@@ -738,3 +739,52 @@ jobs:
             -f message="chore(automation): release $LEASE_OWNER lease" \
             -f sha="$lease_sha" \
             -f branch="automation-control" >/dev/null
+
+      - name: Queue next autonomous cycle
+        if: success() && steps.lease.outputs.acquired == 'true'
+        shell: bash
+        env:
+          RECOVERED: ${{ steps.recover.outputs.recovered }}
+          DEV_CI_RUN: ${{ steps.devci.outputs.run_id }}
+          PLAN_ISSUE: ${{ steps.plan.outputs.issue }}
+        run: |
+          set -euo pipefail
+
+          progressed=false
+          if [[ "$RECOVERED" == "true" || -n "$DEV_CI_RUN" || -n "$PLAN_ISSUE" ]]; then
+            progressed=true
+          fi
+          [[ "$progressed" == "true" ]] || exit 0
+
+          open_prs="$(gh pr list --repo "$REPO" --state open --limit 100 --json headRefName | \
+            jq '[.[] | select(.headRefName | startswith("automation/"))] | length')"
+          active_runs="$(gh run list --repo "$REPO" --limit 100 --json databaseId,status | \
+            jq --argjson current "$GITHUB_RUN_ID" \
+              '[.[] | select((.status == "queued" or .status == "in_progress") and .databaseId != $current)] | length')"
+
+          if [[ "$open_prs" -gt 0 || "$active_runs" -gt 0 ]]; then
+            echo "Next cycle not queued: open_prs=$open_prs active_runs=$active_runs"
+            exit 0
+          fi
+
+          if gh api "repos/$REPO/contents/.automation/lease.active?ref=automation-control" >/dev/null 2>&1; then
+            echo "Next cycle not queued because lease.active still exists."
+            exit 0
+          fi
+
+          path=".automation/kicks/continue-$GITHUB_RUN_ID.trigger"
+          encoded="$(printf 'Previous autonomous cycle completed; continue with the next READY task.\n' | base64 -w0)"
+          gh api --method PUT "repos/$REPO/contents/$path" \
+            -f message="chore(automation): queue next autonomous cycle" \
+            -f content="$encoded" -f branch="automation-control" >/dev/null
+
+      - name: Queue GitHub Doctor after failed cycle
+        if: failure() && steps.lease.outputs.acquired == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          path=".automation/doctor-kicks/core-$GITHUB_RUN_ID.trigger"
+          encoded="$(printf 'Autonomous core failed; diagnose orchestration and recover if safe.\n' | base64 -w0)"
+          gh api --method PUT "repos/$REPO/contents/$path" \
+            -f message="chore(automation): request GitHub Doctor recovery" \
+            -f content="$encoded" -f branch="automation-control" >/dev/null
