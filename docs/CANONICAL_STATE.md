@@ -37,6 +37,38 @@ rewired to use it in this slice. It is the foundation later cards build on
 for state/reason separation, a generic transition-graph validator, and an
 invariant framework.
 
+## Object revision model
+
+`internal/canonical/revisioned.go` defines the generic "object revision
+model" built purely on the `Revision`/`CheckExpectedRevision`/
+`NextRevision` primitives (`revision.go`, A1-001):
+
+- `Revisioned[T any]{Revision, Value}` pairs a mutable canonical object's
+  current payload (`Value`) with its current monotonic `Revision`.
+  `NewRevisioned(value)` wraps a newly created object at the initial
+  `Revision` (`1`), mirroring the `Version >= 1` contract already enforced
+  for `specification.Requirement`.
+- `Revisioned[T].Update(expected Revision, mutate func(T) (T, error))
+  (Revisioned[T], error)` is the single mutation entry point: it first
+  checks `expected` against the receiver's current `Revision` via
+  `CheckExpectedRevision` — a stale `expected` is rejected with
+  `*RevisionConflictError` (`ErrRevisionConflict`) and `mutate` is never
+  invoked, so last-write-wins is not reachable through this method. On a
+  matching `expected`, `mutate` runs against the current `Value`; if it
+  returns an error, that error is returned unchanged and the `Revision` is
+  not advanced. Only once `mutate` succeeds does the `Revision` advance by
+  exactly one via `NextRevision` (surfacing `ErrRevisionExhausted` instead
+  of wrapping) and the updated `Value` take effect.
+
+This mirrors the `Rule[T]`/`RuleSet[T]` generic-extraction convention
+(`invariant.go`, A1-006's dependency base): it is purely additive and does
+not rewire any existing entity (`Task`, `ChangeSet`,
+`specification.Requirement`) onto `Revisioned[T]` in this slice. It gives
+later cards (e.g. canonical schema/persistence, optimistic concurrency
+enforcement at the storage boundary) a single reusable shape for "a
+mutable canonical object with monotonic revision metadata" instead of each
+entity hand-rolling its own revision field and conflict check.
+
 ## State/reason separation
 
 `internal/canonical/reason.go` defines a reusable "why a state holds"
@@ -125,6 +157,11 @@ An invalid envelope is rejected before persistence or publication.
 Critical state uses exact expected-revision checks. Last-write-wins is not an acceptable conflict policy.
 
 A stale caller receives a typed revision-conflict error containing both expected and actual revisions. The caller must reconcile against current canonical state rather than silently overwrite it.
+
+`Revisioned[T].Update` (see "Object revision model" above) is the single
+generic entry point enforcing this rule: a mismatched expected revision is
+rejected before the mutation runs, and the revision only advances, by
+exactly one, once the mutation itself succeeds.
 
 ## Boundary
 
