@@ -62,9 +62,10 @@ emit() {
   circuit="$(update_circuit)"
   release_lease
   if [[ "$kick" == "true" && "$circuit" != "true" ]]; then
-    path=".automation/kicks/doctor-$CURRENT.trigger"
-    encoded="$(printf 'GitHub Doctor recovery completed; resume autonomous core.\n' | base64 -w0)"
-    gh api --method PUT "repos/$REPO/contents/$path" -f message="chore(automation): resume core after Doctor recovery" -f content="$encoded" -f branch="automation-control" >/dev/null
+    # Resume the authoritative product executor explicitly. A self-push made
+    # with GITHUB_TOKEN would be recursion-suppressed by GitHub Actions.
+    gh workflow run autonomous-core.yml --repo "$REPO" --ref automation-control
+    echo "Queued Autonomous Core via workflow_dispatch after Doctor recovery."
   fi
 }
 
