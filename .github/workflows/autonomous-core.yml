@@ -777,11 +777,11 @@ jobs:
             exit 0
           fi
 
-          path=".automation/kicks/continue-$GITHUB_RUN_ID.trigger"
-          encoded="$(printf 'Previous autonomous cycle completed; continue with the next READY task.\n' | base64 -w0)"
-          gh api --method PUT "repos/$REPO/contents/$path" \
-            -f message="chore(automation): queue next autonomous cycle" \
-            -f content="$encoded" -f branch="automation-control" >/dev/null
+          # Use workflow_dispatch rather than a self-generated push. GitHub
+          # suppresses ordinary GITHUB_TOKEN push events from starting another
+          # workflow, but explicitly allows workflow_dispatch chaining.
+          gh workflow run autonomous-core.yml --repo "$REPO" --ref automation-control
+          echo "Queued next Autonomous Core cycle via workflow_dispatch."
 
       - name: Queue GitHub Doctor after failed cycle
         if: failure() && steps.lease.outputs.acquired == 'true'
