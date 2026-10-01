@@ -69,8 +69,8 @@ func (c ChangeSet) Validate() error {
 	if err := c.Attempt.Validate(); err != nil {
 		return fmt.Errorf("%w: %s", ErrChangeSetInvariant, err)
 	}
-	if strings.TrimSpace(c.Target.Kind) == "" || strings.TrimSpace(c.Target.ID) == "" {
-		return fmt.Errorf("%w: target object ref is required", ErrChangeSetInvariant)
+	if err := c.Target.Validate(); err != nil {
+		return fmt.Errorf("%w: target object ref is invalid: %w", ErrChangeSetInvariant, err)
 	}
 	if c.BaseRevision == 0 {
 		return fmt.Errorf("%w: base revision is required", ErrChangeSetInvariant)

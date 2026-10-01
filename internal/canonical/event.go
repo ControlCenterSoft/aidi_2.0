@@ -6,11 +6,6 @@ import (
 	"time"
 )
 
-type ObjectRef struct {
-	Kind string `json:"kind"`
-	ID   string `json:"id"`
-}
-
 type Event struct {
 	ID            string    `json:"id"`
 	Type          string    `json:"type"`
@@ -39,9 +34,11 @@ func (e Event) Validate() error {
 		return fmt.Errorf("event id is required")
 	case strings.TrimSpace(e.Type) == "":
 		return fmt.Errorf("event type is required")
-	case strings.TrimSpace(e.Object.Kind) == "":
+	case strings.TrimSpace(string(e.Object.Kind)) == "":
 		return fmt.Errorf("event object kind is required")
-	case strings.TrimSpace(e.Object.ID) == "":
+	case e.Object.Kind.Validate() != nil:
+		return fmt.Errorf("event object kind is invalid: %w", e.Object.Kind.Validate())
+	case strings.TrimSpace(string(e.Object.ID)) == "":
 		return fmt.Errorf("event object id is required")
 	case e.Revision == 0:
 		return fmt.Errorf("event revision must be greater than zero")
