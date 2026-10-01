@@ -14,6 +14,29 @@ Source: approved AIDI v2.0.0 SPEC §4.1.
 
 `Event` and `ChangeSet` validation now delegates to this shared `Kind`/`ID`/`ObjectRef` contract while preserving their existing JSON field names and public behavior. This is a pure domain/Go contract: it introduces no PostgreSQL, NATS, Temporal, HTTP, or runner/VM/queue infrastructure.
 
+## Closed-set state contract
+
+`internal/canonical/state.go` defines the single reusable "value is one of a
+closed, named set" contract:
+
+- `State` — a `string`-based canonical state value.
+- `StateSet` — a closed, named set of allowed `State` values, built with
+  `NewStateSet(states ...State)`.
+- `State.Validate(allowed StateSet) error` rejects an empty/whitespace-only
+  state and any state outside the caller-supplied `allowed` set, returning
+  the single exported sentinel `ErrInvalidState` in both cases (following the
+  `ErrInvalidKind`/`ErrInvalidID` naming convention).
+
+This extracts the pattern that `TaskState` (`task.go`), `ChangeSetState`
+(`changeset.go`) and `specification.RequirementStatus` each hand-roll
+independently today — a `string`-based state type with a private
+`validateKnownState` and a bespoke `ErrXInvariant`/`ErrInvalidXTransition`
+pair, duplicated three times. `State`/`StateSet` is purely additive: no
+existing `TaskState`, `ChangeSetState`, or `RequirementStatus` caller is
+rewired to use it in this slice. It is the foundation later cards build on
+for state/reason separation, a generic transition-graph validator, and an
+invariant framework.
+
 ## Event envelope
 
 Every persisted significant transition must be representable by a versioned canonical Event containing:
