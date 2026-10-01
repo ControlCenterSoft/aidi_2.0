@@ -788,8 +788,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          path=".automation/doctor-kicks/core-$GITHUB_RUN_ID.trigger"
-          encoded="$(printf 'Autonomous core failed; diagnose orchestration and recover if safe.\n' | base64 -w0)"
-          gh api --method PUT "repos/$REPO/contents/$path" \
-            -f message="chore(automation): request GitHub Doctor recovery" \
-            -f content="$encoded" -f branch="automation-control" >/dev/null
+          # Explicit workflow_dispatch is required here: GitHub suppresses
+          # workflows caused by self-pushes made with the job GITHUB_TOKEN.
+          gh workflow run github-doctor.yml --repo "$REPO" --ref automation-control
+          echo "Queued GitHub Doctor via workflow_dispatch."
