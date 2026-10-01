@@ -1,0 +1,6 @@
+{
+  "owner": "chatgpt-doctor-dispatch-fix-20261001T193740Z",
+  "started_at": "2026-10-01T19:37:40Z",
+  "lease_until": "2026-10-01T19:41:40Z",
+  "task_role": "switch_github_doctor_handoff_to_workflow_dispatch"
+}
