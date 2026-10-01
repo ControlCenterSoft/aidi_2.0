@@ -2,9 +2,11 @@
 
 Status: **IN DEVELOPMENT**
 
-> This document covers two additive slices: `A5-001` (the `Policy`
-> domain types and validation) and `A5-002` (the `Evaluate` ALLOW/DENY
-> decision function). Both live in `internal/policy`.
+> This document covers three additive slices: `A5-001` (the `Policy`
+> domain types and validation), `A5-002` (the `Evaluate` ALLOW/DENY
+> decision function), and `A5-003` (the `PolicyRevision`
+> revision/versioning domain contract). All three live in
+> `internal/policy`.
 
 SPEC §4.1 lists the canonical entity hierarchy as `Installation →
 Identity/User → Workspace → Project → Specification → Requirement →
@@ -122,9 +124,59 @@ inputs always produce an identical `Decision` (mirrors the existing
 `authorization.Evaluate` / `apiratelimit.Evaluate` pattern already in this
 codebase).
 
-Matching beyond exact tuple equality (wildcards/globs) and policy
-revision/versioning persistence (`A5-003`) remain out of scope for
-`Evaluate`.
+Matching beyond exact tuple equality (wildcards/globs) remains out of
+scope for `Evaluate`.
+
+## Revision/versioning (`A5-003`)
+
+```go
+type PolicyRevision struct {
+    Policy   Policy
+    Revision canonical.Revision
+}
+
+func (pr PolicyRevision) Validate() error
+
+func NextPolicyRevision(current PolicyRevision, next Policy, expected canonical.Revision) (PolicyRevision, error)
+```
+
+`PolicyRevision` pairs an immutable `Policy` snapshot with a
+`canonical.Revision` (the existing `internal/canonical` revision
+primitive from `A1-003`), mirroring the optimistic-concurrency boundary
+already used by `internal/repository` (`A2-003`). This is a **pure domain
+contract only**: no persistence, no HTTP, no queue/VM/runner wiring — the
+actual persistence/storage adapter, revision history retrieval/listing,
+HTTP/API exposure, and policy diffing/audit trail are out of scope and
+left to later, separate cards.
+
+`PolicyRevision.Validate()` rejects, via the wrapped sentinel error
+`ErrInvalidPolicyRevision`: an invalid underlying `Policy` (per
+`Policy.Validate()`), and a zero `Revision`.
+
+`NextPolicyRevision(current, next, expected)`:
+
+1. Validates `next` via `Policy.Validate()`, returning the wrapped
+   `ErrInvalidPolicy` on failure.
+2. Requires `next.ID == current.Policy.ID`, returning the wrapped
+   sentinel error `ErrPolicyIDMismatch` otherwise.
+3. Enforces optimistic concurrency via
+   `canonical.CheckExpectedRevision(expected, current.Revision)`: a
+   stale/incorrect `expected` is rejected via the wrapped
+   `canonical.ErrRevisionConflict` / `*canonical.RevisionConflictError`,
+   without mutating `current`.
+4. Advances the revision via `canonical.NextRevision(current.Revision)`
+   and returns a new `PolicyRevision{Policy: next, Revision: ...}`.
+
+The first revision of a given `PolicyID` starts at `expected = 0` and
+advances to revision `1`; subsequent successful calls advance `N → N+1`,
+matching the `internal/repository` convention. `NextPolicyRevision` is a
+pure function: no I/O, no clock, no global/singleton state — identical
+inputs always produce an identical result.
+
+No file in `internal/policy` imports `net/http`, `database/sql`, or any
+queue/workflow runtime package, and this slice introduces no new
+`go.mod` dependency; `internal/policy`'s only internal dependency beyond
+the Go standard library is `internal/canonical`.
 
 ## Authorization → Policy → Execution pipeline (`A5-005`)
 
@@ -157,8 +209,11 @@ this package's public API.
 
 ## Scope boundary
 
-This slice deliberately excludes: policy revision/versioning persistence
-(`A5-003`), wildcard/glob matching beyond exact tuple equality, a
+This slice deliberately excludes: policy revision/versioning
+*persistence* (an actual storage adapter, revision history
+retrieval/listing, and HTTP/API exposure — left to later, separate
+cards; the `A5-003` pure domain contract itself is implemented, see
+above), wildcard/glob matching beyond exact tuple equality, a
 persisted audit trail, `SUPER_ADMIN` global-role handling, and any HTTP/
 persistence/queue wiring. No file in `internal/policy` or
 `internal/authzpipeline` imports `net/http`, `database/sql`, NATS,
@@ -184,6 +239,19 @@ DENY on the same tuple), allow-only match, deny-only match, default-deny
 (no matching statement), invalid `Policy` and invalid/empty tuple inputs
 (table-driven, no panics), and determinism (identical inputs produce an
 identical `Decision`).
+
+`internal/policy/revision_test.go` covers (`A5-003`): valid/invalid
+`PolicyRevision.Validate()` (invalid underlying `Policy`, zero
+`Revision`); `NextPolicyRevision` success paths (`0 → 1` first revision,
+`N → N+1` subsequent revision); rejection of mismatched `PolicyID`
+between `current` and `next` (via `ErrPolicyIDMismatch`); rejection of a
+stale `expected` revision (via the wrapped
+`canonical.ErrRevisionConflict` / `*canonical.RevisionConflictError`)
+with no mutation of `current`; rejection of an invalid `next` `Policy`
+(via `ErrInvalidPolicy`); revision exhaustion (via
+`canonical.ErrRevisionExhausted`); and determinism (identical inputs
+produce an identical result, no I/O/clock/global state). `go test
+./internal/policy/... -cover` reports 100% statement coverage.
 
 `gofmt -l .`, `go vet ./...`, and `go test -race ./...` pass clean
 repo-wide with no regression to existing packages.
