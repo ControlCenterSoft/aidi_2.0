@@ -310,3 +310,100 @@ func TestLeaseSurvivesControlProcessRestart(t *testing.T) {
 func TestRepositoryStoreImplementsStore(t *testing.T) {
 	var _ Store = NewRepositoryStore(repository.NewInMemory())
 }
+
+// TestLeaseFencingTokenMatchesGeneration is the direct evidence that
+// Lease.FencingToken() (A7-004) is simply Generation under a self-describing
+// name, for every Generation value a Lease.Validate accepts.
+func TestLeaseFencingTokenMatchesGeneration(t *testing.T) {
+	cases := []uint64{0, 1, 2, 42}
+	for _, generation := range cases {
+		l := Lease{Generation: generation}
+		if got, want := l.FencingToken(), FencingToken(generation); got != want {
+			t.Fatalf("Lease{Generation: %d}.FencingToken() = %d, want %d", generation, got, want)
+		}
+	}
+}
+
+// TestReplacementOwnerReceivesMonotonicallyNewerFencingTokenAfterExpiry is
+// the direct evidence for the A7-004 acceptance criterion "Replacement
+// owner receives monotonically newer generation" in the expiry case: a
+// different owner acquiring ref after the previous holder's Lease expired
+// receives a strictly greater FencingToken than the one the expired holder
+// held.
+func TestReplacementOwnerReceivesMonotonicallyNewerFencingTokenAfterExpiry(t *testing.T) {
+	store := NewRepositoryStore(repository.NewInMemory())
+	ref := testRef()
+	now := time.Now()
+
+	original, err := store.Acquire(context.Background(), ref, "owner-1", now, time.Second)
+	if err != nil {
+		t.Fatalf("Acquire() original error = %v", err)
+	}
+
+	later := now.Add(2 * time.Second)
+	replacement, err := store.Acquire(context.Background(), ref, "owner-2", later, time.Minute)
+	if err != nil {
+		t.Fatalf("Acquire() replacement error = %v", err)
+	}
+
+	if replacement.Owner == original.Owner {
+		t.Fatalf("replacement.Owner = %q, want different from original.Owner %q", replacement.Owner, original.Owner)
+	}
+	if replacement.FencingToken() <= original.FencingToken() {
+		t.Fatalf("replacement.FencingToken() = %d, want strictly greater than original.FencingToken() %d", replacement.FencingToken(), original.FencingToken())
+	}
+}
+
+// TestReplacementOwnerReceivesMonotonicallyNewerFencingTokenAfterRelease
+// is the A7-004 acceptance criterion's Release-driven counterpart: a
+// different owner acquiring ref immediately after the previous holder
+// explicitly released it still receives a strictly greater FencingToken.
+func TestReplacementOwnerReceivesMonotonicallyNewerFencingTokenAfterRelease(t *testing.T) {
+	store := NewRepositoryStore(repository.NewInMemory())
+	ref := testRef()
+	now := time.Now()
+
+	original, err := store.Acquire(context.Background(), ref, "owner-1", now, time.Minute)
+	if err != nil {
+		t.Fatalf("Acquire() original error = %v", err)
+	}
+	if _, err := store.Release(context.Background(), ref, "owner-1", original.Generation, now); err != nil {
+		t.Fatalf("Release() error = %v", err)
+	}
+
+	replacement, err := store.Acquire(context.Background(), ref, "owner-2", now, time.Minute)
+	if err != nil {
+		t.Fatalf("Acquire() replacement error = %v", err)
+	}
+	if replacement.FencingToken() <= original.FencingToken() {
+		t.Fatalf("replacement.FencingToken() = %d, want strictly greater than original.FencingToken() %d", replacement.FencingToken(), original.FencingToken())
+	}
+}
+
+// TestReplacementOwnerFencingTokenMonotonicAcrossControlProcessRestart
+// combines A7-003's restart durability with A7-004's monotonic FencingToken:
+// a replacement owner acquiring through a freshly constructed RepositoryStore
+// that only shares the same backing repository.Repository — simulating a
+// control-process restart — still receives a FencingToken strictly greater
+// than the one issued to the pre-restart holder.
+func TestReplacementOwnerFencingTokenMonotonicAcrossControlProcessRestart(t *testing.T) {
+	backingStore := repository.NewInMemory()
+	ref := testRef()
+	now := time.Now()
+
+	beforeRestart := NewRepositoryStore(backingStore)
+	original, err := beforeRestart.Acquire(context.Background(), ref, "owner-1", now, time.Second)
+	if err != nil {
+		t.Fatalf("Acquire() before restart error = %v", err)
+	}
+
+	afterRestart := NewRepositoryStore(backingStore)
+	later := now.Add(2 * time.Second)
+	replacement, err := afterRestart.Acquire(context.Background(), ref, "owner-2", later, time.Minute)
+	if err != nil {
+		t.Fatalf("Acquire() after restart error = %v", err)
+	}
+	if replacement.FencingToken() <= original.FencingToken() {
+		t.Fatalf("replacement.FencingToken() = %d, want strictly greater than original.FencingToken() %d", replacement.FencingToken(), original.FencingToken())
+	}
+}

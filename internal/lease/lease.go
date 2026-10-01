@@ -2,7 +2,8 @@
 // domain contract (A7-003) required by approved SPEC §4.3/§8 ("Workflow/
 // Attempt state persisted, а не RAM-only. Lease и fencing token являются
 // first-class; просроченный owner не может записать результат после
-// потери ownership.").
+// потери ownership."), together with the monotonic FencingToken derived
+// from it (A7-004).
 //
 // Its sole hard dependency is the already-existing data-access/domain
 // repository boundary package (internal/repository, A2-003): persistence
@@ -13,14 +14,16 @@
 // no in-process state of its own beyond the repository.Repository
 // reference it wraps.
 //
-// This package deliberately implements only the persisted Lease primitive
-// itself — Owner, Generation and ExpiresAt — and the minimal CAS
-// (compare-and-swap by owner+generation) needed for Acquire/Renew/Release
-// to be meaningful. It intentionally does not implement: monotonic
-// fencing-token enforcement across external command/event writes
-// (`A7-004`), expiry-driven reconciliation state machines (`A7-005`), or
-// stale-owner write rejection at the point of use (`A7-006`). Those remain
-// separate, later cards layered on top of this persisted Lease.
+// This package implements the persisted Lease primitive itself — Owner,
+// Generation and ExpiresAt — the minimal CAS (compare-and-swap by
+// owner+generation) needed for Acquire/Renew/Release to be meaningful, and
+// the FencingToken derived from Generation that a replacement owner
+// presents on subsequent external command/event writes (`A7-004`). It
+// intentionally does not implement: expiry-driven reconciliation state
+// machines (`A7-005`), or validating a presented FencingToken against the
+// authoritative Lease at the point of use so that a stale owner's write is
+// rejected (`A7-006`). Those remain separate, later cards layered on top
+// of this persisted Lease and its FencingToken.
 //
 // This package is isolated from the current/local AIDI runtime: it has no
 // dependency on any live/current AIDI database, Forgejo, local VM/runner
@@ -84,6 +87,30 @@ type Lease struct {
 	ExpiresAt  time.Time
 }
 
+// FencingToken is the monotonic fencing generation (A7-004) a Lease holder
+// presents on external command/event writes so that a downstream consumer
+// can reject a write carrying a token older than the authoritative Lease's
+// current Generation. It is a thin, named alias over Lease.Generation: the
+// two always agree for a given Lease, and FencingToken exists purely so
+// that call sites writing to an external command/event sink have a
+// self-describing type to attach to the write instead of a bare uint64.
+//
+// FencingToken(0) is never issued by Acquire (see Lease.Validate) and is
+// reserved as the "no token held" sentinel, mirroring Generation 0.
+type FencingToken uint64
+
+// FencingToken returns the FencingToken a holder of l must present on
+// subsequent external command/event writes. It is always equal to
+// FencingToken(l.Generation): Acquire strictly increases Generation on
+// every successful acquisition — including a later acquisition by a
+// different, replacement owner after the previous holder's Lease expired
+// or was released — so a replacement owner's FencingToken is always
+// strictly greater than every FencingToken issued to a previous holder of
+// the same Ref.
+func (l Lease) FencingToken() FencingToken {
+	return FencingToken(l.Generation)
+}
+
 // Validate rejects a Lease whose fields are not in a consistent state. A
 // Generation of 0 requires an empty Owner and a zero ExpiresAt (the
 // never-acquired sentinel); a Generation greater than 0 requires a
@@ -130,13 +157,19 @@ type Store interface {
 
 	// Acquire persists a new Lease for ref owned by owner, expiring at
 	// now.Add(ttl), and returns it. Generation advances by one from the
-	// Generation most recently persisted for ref.
+	// Generation most recently persisted for ref, so the returned
+	// Lease.FencingToken() (A7-004) is always strictly greater than every
+	// FencingToken previously issued for ref.
 	//
 	// Acquire fails with ErrLeaseHeld when ref is currently held
 	// (Lease.Held(now)) by a different owner. It succeeds when ref has
 	// never been acquired, when the current holder's lease has expired
 	// (regardless of owner), or when owner already holds it (a
-	// re-acquisition, which still advances Generation).
+	// re-acquisition, which still advances Generation). In particular, a
+	// replacement owner — one that differs from the previous holder,
+	// acquiring after expiry or Release — always receives a
+	// monotonically newer FencingToken than the one the previous holder
+	// held.
 	//
 	// It returns the error from ref.Validate when ref is invalid,
 	// ErrInvalidOwner when owner is empty/whitespace-only, and
