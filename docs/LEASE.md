@@ -14,15 +14,20 @@ Source: approved AIDI v2.0.0 SPEC §4.3 and §8 ("Workflow/Attempt state persist
   - `Release(ctx, ref, owner, generation, now) (Lease, error)` sets `ExpiresAt` to `now` (immediately expired) without clearing `Owner`/`Generation`, so the last holder stays visible for audit while `ref` becomes immediately available to the next `Acquire` by any owner. It requires the same exact `owner`/`generation` match as `Renew`.
 - `RepositoryStore` is the only implementation: a thin adapter over `repository.Repository` that encodes `Lease` as its `StoredObject.Payload` and uses `repository.Repository.Save`'s optimistic concurrency (A2-003) as the compare-and-swap for every `Acquire`/`Renew`/`Release`. `RepositoryStore` holds no state of its own — all `Lease` data lives in the wrapped `repository.Repository` — which is what makes restart-survival a direct consequence of A2-003's persistence rather than something `internal/lease` has to reimplement.
 
+## Fencing generation (`A7-004`, implemented)
+
+`Lease.FencingToken() FencingToken` is a thin, named alias over `Lease.Generation` (`FencingToken(l.Generation)`): it is the monotonic fencing token a Lease holder presents on external command/event writes so that a downstream consumer can reject a write carrying a token older than the authoritative `Lease`'s current `Generation`.
+
+Because `Acquire` always advances `Generation` by one from whatever was most recently persisted for `ref` — including when the new acquisition is by a different, replacement owner after the previous holder's lease expired or was released, and including across a control-process restart (`A7-003`'s durability) — a replacement owner's `FencingToken()` is always strictly greater than every `FencingToken()` issued to a previous holder of the same `ref`. `FencingToken(0)` is never issued by `Acquire` and is reserved as the "no token held" sentinel, mirroring `Generation 0`.
+
 ## Scope boundary
 
-This slice implements only the persisted Lease primitive — `Owner`, `Generation`, `ExpiresAt`, and the minimal owner/generation compare-and-swap needed for `Acquire`/`Renew`/`Release` to be meaningful. It intentionally does not implement:
+This slice implements the persisted Lease primitive — `Owner`, `Generation`, `ExpiresAt`, and the minimal owner/generation compare-and-swap needed for `Acquire`/`Renew`/`Release` to be meaningful — together with the `FencingToken` derived from `Generation` (`A7-004`). It intentionally does not implement:
 
-- monotonic fencing-token enforcement across external command/event writes (`A7-004`, "Fencing generation");
 - expiry-driven reconciliation state machines, i.e. a `RECONCILING` state that must clear before re-acquisition (`A7-005`, "Lease expiry reconciliation");
-- stale-owner write rejection at the point of use, i.e. validating a caller's fencing token against the authoritative lease before accepting a result (`A7-006`, "Stale-owner rejection").
+- validating a presented `FencingToken` against the authoritative `Lease` at the point of use so that a stale owner's write is rejected (`A7-006`, "Stale-owner rejection").
 
-Those remain separate, later Release A slices layered on top of this persisted Lease. `internal/orchestration`'s existing RAM-only `Ownership` model independently covers adjacent domain logic (acquire/renew/release, fencing tokens, reconciliation) for workflow ownership; it is untouched by this slice and remains a separate card lineage.
+Those remain separate, later Release A slices layered on top of this persisted Lease and its `FencingToken`. `internal/orchestration`'s existing RAM-only `Ownership` model independently covers adjacent domain logic (acquire/renew/release, fencing tokens, reconciliation) for workflow ownership; it is untouched by this slice and remains a separate card lineage.
 
 ## Evidence
 
@@ -34,5 +39,7 @@ The package tests (`internal/lease/lease_test.go`) cover:
 - `Renew` extending `ExpiresAt` without changing `Generation`, and rejecting a wrong owner/generation (`ErrStaleLease`) or a never-acquired `ref` (`ErrNotHeld`);
 - `Release` making `ref` immediately available to a new owner while preserving the last holder for audit, and rejecting a stale caller;
 - `TestLeaseSurvivesControlProcessRestart` — the direct evidence for the acceptance criterion "Lease survives control-process restart": a second `RepositoryStore`, constructed independently and sharing only the same backing `repository.Repository`, observes the identical persisted `Lease` and can `Renew` it, exactly as a freshly started control process would after reloading its backing store.
+- `TestLeaseFencingTokenMatchesGeneration` — `Lease.FencingToken()` is exactly `FencingToken(Generation)` for every `Generation` a valid `Lease` can hold.
+- `TestReplacementOwnerReceivesMonotonicallyNewerFencingTokenAfterExpiry`, `TestReplacementOwnerReceivesMonotonicallyNewerFencingTokenAfterRelease` and `TestReplacementOwnerFencingTokenMonotonicAcrossControlProcessRestart` — the direct evidence for the `A7-004` acceptance criterion "Replacement owner receives monotonically newer generation": a different owner acquiring `ref` after the previous holder's lease expired, after it was explicitly released, or through a freshly constructed `RepositoryStore` sharing only the same backing `repository.Repository` (simulating a control-process restart), always receives a `FencingToken()` strictly greater than the one issued to the previous holder.
 
 This package is isolated from the current/local AIDI runtime: no component in this slice depends on any live/current AIDI database, Forgejo, local VM/runner infrastructure, or message queue.
