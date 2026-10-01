@@ -23,6 +23,7 @@ EXPECTED_TOTAL = 101
 EXPECTED_EDGES = 263
 EXPECTED_SOURCE_SHA256 = "91f720101294c36b8243cbead1c064d67f8d27f33dd52386f256a9102c8393aa"
 EXPECTED_INDEX_SHA256 = "eaa6b5d368142d886300b72b85e594188fe88551b19fa0b49ce8cc6b1c971f29"
+CANONICAL_MARKER = f"<!-- aidi-release-a-manifest: 1.0 sha256={EXPECTED_SOURCE_SHA256} -->"
 
 
 class BacklogError(RuntimeError):
@@ -138,6 +139,9 @@ def load_issue_registry(path: Path, by_key: dict[str, Card]) -> dict[str, dict]:
     duplicate_keys: list[str] = []
     for issue in raw:
         if issue.get("pull_request"):
+            continue
+        body = issue.get("body") or ""
+        if CANONICAL_MARKER not in body:
             continue
         title = issue.get("title") or ""
         match = KEY_RE.match(title)
