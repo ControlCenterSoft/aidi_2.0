@@ -80,6 +80,27 @@ following the `FromRateLimitDecision` mapping pattern exactly:
 - A malformed `Decision` (denied without a `Reason`) is rejected via
   `Decision.Validate()` before any mapping is attempted.
 
+## Authorization → Policy → Execution pipeline
+
+`internal/authzpipeline.Authorize(registry *toolregistry.Registry, req authzpipeline.Request) (authzpipeline.Decision, error)`
+(backlog A5-005) composes this package's `Evaluate` with
+`internal/policy.Evaluate` and `internal/toolregistry.Registry.Get` into a
+single deterministic pre-execution gate, with a fixed precedence order:
+
+1. RBAC denial (this package's `Evaluate`) short-circuits first — if the
+   `Role` does not hold the `Capability`, the policy and tool are not even
+   evaluated.
+2. Explicit policy `DENY`, then
+3. policy default-deny (no matching statement) — both resolved by a
+   single `policy.Evaluate` call.
+4. Non-ACTIVE or unregistered tool — the `ToolID` must resolve to a
+   registered `Tool` with `Status == toolregistry.StatusActive`.
+
+The request is allowed only when RBAC allows **and** policy allows **and**
+the tool is `StatusActive`. See `docs/POLICY.md` for the full
+precedence/scope writeup; this package's `Evaluate` and `Decision` are
+unchanged by A5-005 — `authzpipeline` only composes them.
+
 ## Scope boundary
 
 This slice deliberately excludes: HTTP/middleware wiring, per-endpoint
@@ -110,3 +131,9 @@ value and mapping function: no existing test is modified to pass.
 `go vet ./...` and
 `go test -race ./internal/authorization/... ./internal/apierror/...` pass
 clean.
+
+`internal/authzpipeline/authzpipeline_test.go` covers the `A5-005`
+Authorization → Policy → Execution pipeline built on top of this
+package's `Evaluate`: see `docs/POLICY.md` for the full evidence writeup
+and precedence/scope documentation (`go test
+./internal/authzpipeline/... -cover` reports 100% statement coverage).
