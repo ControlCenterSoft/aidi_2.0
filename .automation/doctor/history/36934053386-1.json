@@ -1,0 +1,9 @@
+{
+  "run_id": "36934053386",
+  "attempt": "1",
+  "fingerprint": "",
+  "outcome": "exact_head_ci_green",
+  "kick_core": true,
+  "circuit_open": false,
+  "observed_at": "2026-10-01T22:16:47Z"
+}
