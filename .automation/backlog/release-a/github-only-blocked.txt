@@ -1,0 +1,3 @@
+# Stable keys that the isolated GitHub executor must not execute because
+# their acceptance criteria require infrastructure outside this repository.
+A0-001	Requires creation/protection of an external private Gitea repository; current execution scope is GitHub-only.
