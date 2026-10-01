@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ControlCenterSoft/aidi_2.0/internal/apiratelimit"
+	"github.com/ControlCenterSoft/aidi_2.0/internal/authorization"
 	"github.com/ControlCenterSoft/aidi_2.0/internal/canonical"
 )
 
@@ -258,5 +259,83 @@ func TestFromRateLimitDecision_RejectsDeniedWithNegativeRetryAfter(t *testing.T)
 
 	if _, err := FromRateLimitDecision(decision, "corr-105"); !errors.Is(err, ErrInvalidError) {
 		t.Fatalf("expected ErrInvalidError for denied decision with negative retry after, got %v", err)
+	}
+}
+
+func TestCodeForbidden_IsKnown(t *testing.T) {
+	e, err := New(CodeForbidden, "not authorized", "corr-200", map[string]string{"reason": "role does not have capability"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if e.Code != CodeForbidden {
+		t.Fatalf("expected CodeForbidden, got %v", e.Code)
+	}
+	if err := e.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestCodeForbidden_ValidateRequiresMandatoryFields(t *testing.T) {
+	cases := []struct {
+		name string
+		in   Error
+	}{
+		{name: "missing message", in: Error{Code: CodeForbidden, Message: "", CorrelationID: "corr-1"}},
+		{name: "missing correlation id", in: Error{Code: CodeForbidden, Message: "denied", CorrelationID: ""}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.in.Validate(); !errors.Is(err, ErrInvalidError) {
+				t.Fatalf("expected ErrInvalidError, got %v", err)
+			}
+		})
+	}
+
+	valid := Error{Code: CodeForbidden, Message: "denied", CorrelationID: "corr-1"}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("unexpected validation error for well-formed CodeForbidden error: %v", err)
+	}
+}
+
+func TestFromAuthorizationDecision_MapsDeniedDecision(t *testing.T) {
+	decision := authorization.Decision{
+		Allowed: false,
+		Reason:  `role "VIEWER" does not have capability "project.mutate"`,
+	}
+
+	mapped, err := FromAuthorizationDecision(decision, "corr-201")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mapped.Code != CodeForbidden {
+		t.Fatalf("expected CodeForbidden, got %v", mapped.Code)
+	}
+	if mapped.CorrelationID != "corr-201" {
+		t.Fatalf("expected correlation id to be preserved, got %q", mapped.CorrelationID)
+	}
+	if mapped.Retryable {
+		t.Fatalf("expected Retryable=false for an authorization denial, got true")
+	}
+	if mapped.Details["reason"] != decision.Reason {
+		t.Fatalf("expected reason to be preserved, got %+v", mapped.Details)
+	}
+	if err := mapped.Validate(); err != nil {
+		t.Fatalf("mapped error failed validation: %v", err)
+	}
+}
+
+func TestFromAuthorizationDecision_RejectsAllowedDecision(t *testing.T) {
+	decision := authorization.Decision{Allowed: true}
+	if _, err := FromAuthorizationDecision(decision, "corr-202"); !errors.Is(err, ErrInvalidError) {
+		t.Fatalf("expected ErrInvalidError for allowed decision, got %v", err)
+	}
+}
+
+func TestFromAuthorizationDecision_RejectsMalformedDeniedDecision(t *testing.T) {
+	// Malformed decision: denied without a Reason must not be mapped into
+	// an error (mirrors FromRateLimitDecision's malformed-input rejection).
+	decision := authorization.Decision{Allowed: false, Reason: ""}
+	if _, err := FromAuthorizationDecision(decision, "corr-203"); !errors.Is(err, ErrInvalidError) {
+		t.Fatalf("expected ErrInvalidError for denied decision without reason, got %v", err)
 	}
 }
