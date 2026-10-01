@@ -287,7 +287,7 @@ jobs:
             exit 0
           }
 
-          copilot -p "
+          timeout --signal=TERM --kill-after=30s 15m copilot -p "
           Repair the existing implementation for GitHub issue #$issue using the authoritative
           Issue scope in /tmp/aidi-review-plan.md and the blocking review findings in
           /tmp/aidi-review-findings.md. Make only the smallest product changes needed to satisfy
@@ -437,7 +437,7 @@ jobs:
         run: |
           set -euo pipefail
           issue="${{ steps.plan.outputs.issue }}"
-          copilot -p "
+          timeout --signal=TERM --kill-after=30s 15m copilot -p "
           Implement the task described in /tmp/aidi-plan.md for GitHub issue #$issue.
           Read that plan plus the approved docs/SPEC.md and docs/ROADMAP.md. Keep the change strictly to one bounded Release A
           Foundation slice. Add or update tests and documentation required by the contract.
@@ -530,7 +530,7 @@ jobs:
           if [[ "$WATCH_STATUS" -ne 0 ]]; then
             gh run view "$RUN_ID" --repo "$REPO" --log-failed > /tmp/aidi-ci-failed.log || true
 
-            copilot -p "
+            timeout --signal=TERM --kill-after=30s 15m copilot -p "
             Repair the implementation for GitHub issue #$issue. The authoritative task plan is
             /tmp/aidi-plan.md and the failed GitHub-hosted CI evidence is
             /tmp/aidi-ci-failed.log. Make only the smallest changes needed to satisfy the issue
