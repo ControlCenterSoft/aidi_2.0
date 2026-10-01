@@ -4,14 +4,68 @@ set -euo pipefail
 REPO="${REPO:?}"
 CURRENT="${GITHUB_RUN_ID:?}"
 OUT="${GITHUB_OUTPUT:?}"
+LEASE_OWNER="doctor-$CURRENT"
 kick=false
 fingerprint=""
 outcome="noop"
+lease_acquired=false
+
+lease_json="$(jq -n --arg owner "$LEASE_OWNER" --arg started "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg until "$(date -u -d '+4 minutes' +%Y-%m-%dT%H:%M:%SZ)" '{owner:$owner,started_at:$started,lease_until:$until,task_role:"AIDI GitHub Doctor"}')"
+lease_encoded="$(printf '%s\n' "$lease_json" | base64 -w0)"
+if gh api --method PUT "repos/$REPO/contents/.automation/lease.active" -f message="chore(automation): acquire $LEASE_OWNER lease" -f content="$lease_encoded" -f branch="automation-control" >/dev/null 2>&1; then
+  lease_acquired=true
+else
+  exit 0
+fi
+
+release_lease() {
+  [[ "$lease_acquired" == "true" ]] || return 0
+  current="$(gh api "repos/$REPO/contents/.automation/lease.active?ref=automation-control" 2>/dev/null || true)"
+  [[ -n "$current" ]] || { lease_acquired=false; return 0; }
+  sha="$(jq -r '.sha' <<<"$current")"
+  body="$(jq -r '.content' <<<"$current" | base64 -d)"
+  owner="$(jq -r '.owner // empty' <<<"$body")"
+  [[ "$owner" == "$LEASE_OWNER" ]] || { lease_acquired=false; return 0; }
+  gh api --method DELETE "repos/$REPO/contents/.automation/lease.active" -f message="chore(automation): release $LEASE_OWNER lease" -f sha="$sha" -f branch="automation-control" >/dev/null
+  lease_acquired=false
+}
+trap release_lease EXIT
+
+update_circuit() {
+  state_path=".automation/doctor/state.json"
+  old_fp=""; old_repeats=0; old_sha=""
+  if current="$(gh api "repos/$REPO/contents/$state_path?ref=automation-control" 2>/dev/null)"; then
+    old_sha="$(jq -r '.sha' <<<"$current")"
+    body="$(jq -r '.content' <<<"$current" | base64 -d)"
+    old_fp="$(jq -r '.last_fingerprint // empty' <<<"$body")"
+    old_repeats="$(jq -r '.repeat_count // 0' <<<"$body")"
+  fi
+  repeats=0; circuit=false
+  if [[ -n "$fingerprint" ]]; then
+    if [[ "$fingerprint" == "$old_fp" ]]; then repeats=$((old_repeats+1)); else repeats=1; fi
+    if [[ "$repeats" -ge 3 ]]; then circuit=true; fi
+  fi
+  state="$(jq -n --arg fp "$fingerprint" --arg outcome "$outcome" --argjson repeats "$repeats" --argjson circuit "$circuit" --arg updated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{last_fingerprint:$fp,repeat_count:$repeats,circuit_open:$circuit,last_outcome:$outcome,updated_at:$updated}')"
+  encoded="$(printf '%s\n' "$state" | base64 -w0)"
+  if [[ -n "$old_sha" ]]; then
+    gh api --method PUT "repos/$REPO/contents/$state_path" -f message="chore(automation): update GitHub Doctor state" -f content="$encoded" -f sha="$old_sha" -f branch="automation-control" >/dev/null
+  else
+    gh api --method PUT "repos/$REPO/contents/$state_path" -f message="chore(automation): create GitHub Doctor state" -f content="$encoded" -f branch="automation-control" >/dev/null
+  fi
+  printf '%s' "$circuit"
+}
 
 emit() {
   echo "kick_core=$kick" >> "$OUT"
   echo "fingerprint=$fingerprint" >> "$OUT"
   echo "outcome=$outcome" >> "$OUT"
+  circuit="$(update_circuit)"
+  release_lease
+  if [[ "$kick" == "true" && "$circuit" != "true" ]]; then
+    path=".automation/kicks/doctor-$CURRENT.trigger"
+    encoded="$(printf 'GitHub Doctor recovery completed; resume autonomous core.\n' | base64 -w0)"
+    gh api --method PUT "repos/$REPO/contents/$path" -f message="chore(automation): resume core after Doctor recovery" -f content="$encoded" -f branch="automation-control" >/dev/null
+  fi
 }
 
 active="$(gh run list --repo "$REPO" --limit 100 --json databaseId,status |
