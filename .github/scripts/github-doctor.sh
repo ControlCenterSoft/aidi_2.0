@@ -75,10 +75,7 @@ update_circuit() {
   if [[ -n "$fingerprint" ]]; then
     if [[ "$fingerprint" == "$old_fp" ]]; then repeats=$((old_repeats+1)); else repeats=1; fi
 
-    # Provider quota exhaustion is an external capacity pause, not a broken
-    # recovery loop. Keep counting observations for diagnostics, but never open
-    # the Doctor circuit for this fingerprint.
-    if [[ "$fingerprint" != "copilot_monthly_quota_exhausted" && "$repeats" -ge 3 ]]; then
+    if [[ "$repeats" -ge 3 ]]; then
       circuit=true
     fi
   fi
@@ -252,7 +249,6 @@ if [[ "$candidate_count" -gt 1 ]]; then
 fi
 
 latest_core="$(gh run list --repo "$REPO" --workflow autonomous-core.yml --limit 1 --json databaseId,status,conclusion,createdAt | jq '.[0] // {}')"
-latest_id="$(jq -r '.databaseId // empty' <<<"$latest_core")"
 latest_status="$(jq -r '.status // empty' <<<"$latest_core")"
 latest_conclusion="$(jq -r '.conclusion // empty' <<<"$latest_core")"
 latest_created="$(jq -r '.createdAt // empty' <<<"$latest_core")"
@@ -273,24 +269,20 @@ if [[ "$latest_conclusion" == "success" && -n "$latest_created" ]]; then
   fi
 fi
 
-if [[ "$latest_conclusion" == "failure" && -n "$latest_id" ]]; then
-  failed_log="$(gh run view "$latest_id" --repo "$REPO" --log-failed 2>&1 || true)"
-  if grep -Eiq 'exceeded your monthly quota|monthly quota[^[:alnum:]]*exceed|quota[^[:alnum:]]*(exhaust|exceed)|premium requests[^[:alnum:]]*(exhaust|exceed)' <<<"$failed_log"; then
-    fingerprint="copilot_monthly_quota_exhausted"
+provider_enabled="false"
+provider_name="disabled"
+if provider_config="$(gh api "repos/$REPO/contents/.automation/coding-provider.json?ref=main" 2>/dev/null)"; then
+  provider_body="$(jq -r '.content' <<<"$provider_config" | base64 -d)"
+  provider_enabled="$(jq -r '.enabled // false' <<<"$provider_body")"
+  provider_name="$(jq -r '.provider // "disabled"' <<<"$provider_body")"
+fi
 
-    # A failed Core immediately dispatches Doctor. Do not bounce straight back
-    # into Core and burn Actions minutes while the external monthly quota is
-    # still unavailable. Only a scheduled Doctor run performs one bounded probe.
-    if [[ "${GITHUB_EVENT_NAME:-}" == "schedule" ]]; then
-      kick=true
-      outcome="probe_provider_quota"
-    else
-      kick=false
-      outcome="blocked_provider_quota"
-    fi
-    emit
-    exit 0
-  fi
+if [[ "$provider_enabled" != "true" ]]; then
+  kick=false
+  fingerprint=""
+  outcome="coding_provider_disabled"
+  emit
+  exit 0
 fi
 
 kick=true
