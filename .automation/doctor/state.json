@@ -1,7 +1,7 @@
 {
-  "last_fingerprint": "",
-  "repeat_count": 0,
+  "last_fingerprint": "core_stale_without_durable_pr",
+  "repeat_count": 1,
   "circuit_open": false,
-  "last_outcome": "coding_provider_disabled",
-  "updated_at": "2026-10-02T16:22:44Z"
+  "last_outcome": "watchdog_resume_stale_core",
+  "updated_at": "2026-10-02T20:54:13Z"
 }
