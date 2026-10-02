@@ -1,0 +1,5 @@
+{
+  "provider": "disabled",
+  "enabled": false,
+  "reason": "No GitHub coding provider is configured. Autonomous product writes are paused until an approved replacement executor is configured."
+}
