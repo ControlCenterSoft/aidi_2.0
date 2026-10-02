@@ -42,7 +42,7 @@ The coding provider is controlled by `.automation/coding-provider.json`. When `e
 7. run deterministic checks locally on the GitHub-hosted runner;
 8. create a draft PR;
 9. explicitly dispatch the full `AIDI CI` workflow for the automation branch;
-10. if CI fails, use the failed CI log for one bounded repair attempt and dispatch CI again;
+10. if CI fails while no coding provider is configured, stop and preserve the PR/CI evidence for later repair;
 11. mark the PR ready and merge only when CI is green and GitHub reports the PR cleanly mergeable;
 12. explicitly validate fresh `main` with the full CI workflow;
 13. fast-forward `development` to `main` without force and explicitly validate it with CI;
