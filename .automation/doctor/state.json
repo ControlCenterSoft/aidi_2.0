@@ -1,7 +1,7 @@
 {
   "last_fingerprint": "core_failure_without_durable_pr",
-  "repeat_count": 4,
+  "repeat_count": 5,
   "circuit_open": true,
   "last_outcome": "retry_failed_core_once",
-  "updated_at": "2026-10-02T00:52:22Z"
+  "updated_at": "2026-10-02T01:46:49Z"
 }
