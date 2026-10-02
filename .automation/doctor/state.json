@@ -1,7 +1,7 @@
 {
-  "last_fingerprint": "core_failure_without_durable_pr",
-  "repeat_count": 5,
-  "circuit_open": true,
-  "last_outcome": "retry_failed_core_once",
-  "updated_at": "2026-10-02T01:46:49Z"
+  "last_fingerprint": "copilot_monthly_quota_exhausted",
+  "repeat_count": 1,
+  "circuit_open": false,
+  "last_outcome": "blocked_provider_quota",
+  "updated_at": "2026-10-02T04:36:39Z"
 }
