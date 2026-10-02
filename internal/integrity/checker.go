@@ -15,35 +15,43 @@ var ErrCheckerUnavailable = errors.New("state integrity checker unavailable")
 type ViolationCode string
 
 const (
-	ViolationMissingObject ViolationCode = "missing_object"
+	ViolationMissingObject       ViolationCode = "missing_object"
 	ViolationInvalidRequestedRef ViolationCode = "invalid_requested_ref"
-	ViolationInvalidStoredRef ViolationCode = "invalid_stored_ref"
-	ViolationReferenceMismatch ViolationCode = "reference_mismatch"
-	ViolationZeroRevision ViolationCode = "zero_revision"
-	ViolationPayloadInvariant ViolationCode = "payload_invariant"
+	ViolationInvalidStoredRef    ViolationCode = "invalid_stored_ref"
+	ViolationReferenceMismatch   ViolationCode = "reference_mismatch"
+	ViolationZeroRevision        ViolationCode = "zero_revision"
+	ViolationPayloadInvariant    ViolationCode = "payload_invariant"
 )
 
 type Violation struct {
-	Code ViolationCode
+	Code         ViolationCode
 	RequestedRef canonical.ObjectRef
-	StoredRef canonical.ObjectRef
-	Revision canonical.Revision
-	Cause error
+	StoredRef    canonical.ObjectRef
+	Revision     canonical.Revision
+	Cause        error
 }
 
 func (v Violation) Error() string {
 	return fmt.Sprintf("%v: %s requested=%s stored=%s revision=%d: %v", ErrIntegrityViolation, v.Code, formatRef(v.RequestedRef), formatRef(v.StoredRef), v.Revision, v.Cause)
 }
 
-func (v Violation) Unwrap() error { return ErrIntegrityViolation }
+func (v Violation) Unwrap() error {
+	return ErrIntegrityViolation
+}
 
-type Report struct { Violations []Violation }
+type Report struct {
+	Violations []Violation
+}
 
-func (r Report) Healthy() bool { return len(r.Violations) == 0 }
+func (r Report) Healthy() bool {
+	return len(r.Violations) == 0
+}
 
 func (r Report) Has(code ViolationCode) bool {
 	for _, violation := range r.Violations {
-		if violation.Code == code { return true }
+		if violation.Code == code {
+			return true
+		}
 	}
 	return false
 }
@@ -51,7 +59,7 @@ func (r Report) Has(code ViolationCode) bool {
 type PayloadValidator func(ref canonical.ObjectRef, payload []byte) error
 
 type Checker struct {
-	repo repository.Repository
+	repo             repository.Repository
 	payloadValidator PayloadValidator
 }
 
@@ -61,7 +69,9 @@ func NewChecker(repo repository.Repository, payloadValidator PayloadValidator) *
 
 func (c *Checker) Check(ctx context.Context, refs ...canonical.ObjectRef) (Report, error) {
 	var report Report
-	if c == nil || c.repo == nil { return report, ErrCheckerUnavailable }
+	if c == nil || c.repo == nil {
+		return report, ErrCheckerUnavailable
+	}
 	for _, requested := range refs {
 		if err := requested.Validate(); err != nil {
 			report.Violations = append(report.Violations, Violation{Code: ViolationInvalidRequestedRef, RequestedRef: requested, Cause: err})
@@ -92,4 +102,6 @@ func (c *Checker) Check(ctx context.Context, refs ...canonical.ObjectRef) (Repor
 	return report, nil
 }
 
-func formatRef(ref canonical.ObjectRef) string { return fmt.Sprintf("%s/%s", ref.Kind, ref.ID) }
+func formatRef(ref canonical.ObjectRef) string {
+	return fmt.Sprintf("%s/%s", ref.Kind, ref.ID)
+}
