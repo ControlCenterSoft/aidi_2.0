@@ -8,14 +8,15 @@ on:
     paths:
       - '.automation/kicks/*.trigger'
   schedule:
-    - cron: "5,15,25,35,45,55 * * * *"
+    # Watchdog only. Normal healthy cycles chain themselves via workflow_dispatch.
+    # Keep this intentionally low-frequency and away from the top of the hour.
+    - cron: "8,38 * * * *"
 
 permissions:
   actions: write
   contents: write
   issues: write
   pull-requests: write
-  copilot-requests: write
 
 concurrency:
   group: aidi-autonomous-core
@@ -31,7 +32,6 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
       LEASE_OWNER: "core-${{ github.run_id }}"
-      COPILOT_VERSION: "1.0.88"
 
     steps:
       - name: Checkout main
@@ -257,88 +257,15 @@ jobs:
           echo "pr=$pr" >> "$GITHUB_OUTPUT"
           echo "main_sha=$main_sha" >> "$GITHUB_OUTPUT"
 
-      - name: Install pinned Copilot CLI for review repair
-        if: steps.lease.outputs.acquired == 'true' && steps.recover.outputs.repair_needed == 'true'
-        run: npm install -g "@github/copilot@$COPILOT_VERSION"
-
-      - name: Repair requested review findings
+      - name: Hold blocking review when coding provider is disabled
         id: reviewrepair
         if: steps.lease.outputs.acquired == 'true' && steps.recover.outputs.repair_needed == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          pr="${{ steps.recover.outputs.pr }}"
-          head="${{ steps.recover.outputs.head }}"
-          issue="${{ steps.recover.outputs.issue }}"
-
-          git fetch origin "$head"
-          git checkout -B "$head" "origin/$head"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          before_sha="$(git rev-parse HEAD)"
-
-          gh issue view "$issue" --repo "$REPO" --json body --jq '.body' > /tmp/aidi-review-plan.md
-          gh pr view "$pr" --repo "$REPO" --json reviews \
-            --jq '[.reviews[]? | select(.state == "CHANGES_REQUESTED") | .body] | join("\n\n---\n\n")' \
-            > /tmp/aidi-review-findings.md
-
-          test -s /tmp/aidi-review-findings.md || {
-            echo "CHANGES_REQUESTED was reported but no actionable review body was found; leaving PR for Review Gate."
-            exit 0
-          }
-
-          timeout --signal=TERM --kill-after=30s 15m copilot -p "
-          Repair the existing implementation for GitHub issue #$issue using the authoritative
-          Issue scope in /tmp/aidi-review-plan.md and the blocking review findings in
-          /tmp/aidi-review-findings.md. Make only the smallest product changes needed to satisfy
-          the requested changes while preserving all already-satisfied acceptance criteria.
-          Do not commit, push, open/merge PRs, change GitHub settings, or access any local AIDI,
-          Forgejo, VM, self-hosted runner, queue, database, file or state outside this checkout.
-          " \
-            -s \
-            --add-dir=/tmp \
-            --allow-tool='read,write,shell(go:*),shell(gofmt:*),shell(python:*),shell(npm:*),shell(node:*),shell(git status),shell(git diff:*),shell(grep:*),shell(find:*),shell(mkdir:*)' \
-            --no-ask-user
-
-          test -z "$(gofmt -l .)"
-          go mod verify
-          go vet ./...
-          go test -race ./...
-          python -m compileall -q workers/src workers/tests
-          PYTHONPATH=workers/src python -m unittest discover -s workers/tests -v
-          (
-            cd web
-            npm ci --ignore-scripts --no-audit --no-fund
-            npm run build
-          )
-          rm -f web/tsconfig.tsbuildinfo
-
-          if [[ -z "$(git status --porcelain)" ]]; then
-            echo "Bounded review repair produced no source change; leaving PR for independent re-review."
-            exit 0
-          fi
-
-          git add -A
-          git commit -m "fix(release-a): address review findings (#$issue)"
-          git push origin "HEAD:$head"
-          repaired_sha="$(git rev-parse HEAD)"
-          [[ "$repaired_sha" != "$before_sha" ]]
-
-          gh workflow run ci.yml --repo "$REPO" --ref "$head"
-          run_id=""
-          for _ in $(seq 1 30); do
-            run_id="$(gh run list --repo "$REPO" --workflow ci.yml --branch "$head" \
-              --event workflow_dispatch --limit 20 --json databaseId,headSha | \
-              jq -r --arg sha "$repaired_sha" '.[] | select(.headSha == $sha) | .databaseId' | head -n1)"
-            [[ -n "$run_id" ]] && break
-            sleep 4
-          done
-          test -n "$run_id"
-          gh run watch "$run_id" --repo "$REPO" --exit-status
-
-          gh pr comment "$pr" --repo "$REPO" --body "Native review-repair updated the branch for the blocking review findings and exact-head workflow_dispatch CI is green. A fresh independent Review Gate approval is still required before merge."
-          echo "sha=$repaired_sha" >> "$GITHUB_OUTPUT"
-          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          echo "Blocking review requires source changes, but no GitHub coding provider is configured."
+          echo "The existing PR is left untouched for a future approved executor."
 
       - name: Verify previous GitHub cycle is complete
         id: previous
@@ -414,12 +341,30 @@ jobs:
           echo "title=$title" >> "$GITHUB_OUTPUT"
           echo "Selected canonical READY card $key as GitHub Issue #$issue."
 
-      - name: Install pinned Copilot CLI
+      - name: Check coding provider
+        id: executor
         if: steps.plan.outputs.issue != ''
-        run: npm install -g "@github/copilot@$COPILOT_VERSION"
+        shell: bash
+        run: |
+          set -euo pipefail
+          config=".automation/coding-provider.json"
+          test -f "$config"
+          provider="$(jq -r '.provider // "disabled"' "$config")"
+          enabled="$(jq -r '.enabled // false' "$config")"
+
+          echo "provider=$provider" >> "$GITHUB_OUTPUT"
+          if [[ "$enabled" != "true" ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Coding provider is disabled. The selected Release A card remains open; no branch, source change, or PR will be created."
+            exit 0
+          fi
+
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          echo "Provider '$provider' is enabled in configuration but no executor adapter is installed in this workflow." >&2
+          exit 1
 
       - name: Create isolated automation branch
-        if: steps.plan.outputs.issue != ''
+        if: steps.executor.outputs.ready == 'true'
         id: branch
         shell: bash
         run: |
@@ -431,24 +376,8 @@ jobs:
           git checkout -b "$branch" origin/main
           echo "name=$branch" >> "$GITHUB_OUTPUT"
 
-      - name: Implement bounded slice with Copilot CLI
-        if: steps.plan.outputs.issue != ''
-        shell: bash
-        run: |
-          set -euo pipefail
-          issue="${{ steps.plan.outputs.issue }}"
-          timeout --signal=TERM --kill-after=30s 15m copilot -p "
-          Implement the task described in /tmp/aidi-plan.md for GitHub issue #$issue.
-          Read that plan plus the approved docs/SPEC.md and docs/ROADMAP.md. Keep the change strictly to one bounded Release A
-          Foundation slice. Add or update tests and documentation required by the contract.
-
-          Do not commit, push, open/merge PRs, change GitHub settings, or access any local AIDI,
-          Forgejo, VM, self-hosted runner, queue, database, file or state outside this checkout.
-          You may edit repository files and run deterministic local checks only.
-          "             -s             --add-dir=/tmp             --allow-tool='read,write,shell(go:*),shell(gofmt:*),shell(python:*),shell(npm:*),shell(node:*),shell(git status),shell(git diff:*),shell(grep:*),shell(find:*),shell(mkdir:*)'             --no-ask-user
-
       - name: Deterministic pre-PR checks
-        if: steps.plan.outputs.issue != ''
+        if: steps.executor.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -468,7 +397,7 @@ jobs:
           test -n "$(git status --porcelain)"
 
       - name: Commit and push automation branch
-        if: steps.plan.outputs.issue != ''
+        if: steps.executor.outputs.ready == 'true'
         id: commit
         shell: bash
         run: |
@@ -529,37 +458,8 @@ jobs:
 
           if [[ "$WATCH_STATUS" -ne 0 ]]; then
             gh run view "$RUN_ID" --repo "$REPO" --log-failed > /tmp/aidi-ci-failed.log || true
-
-            timeout --signal=TERM --kill-after=30s 15m copilot -p "
-            Repair the implementation for GitHub issue #$issue. The authoritative task plan is
-            /tmp/aidi-plan.md and the failed GitHub-hosted CI evidence is
-            /tmp/aidi-ci-failed.log. Make only the smallest changes needed to satisfy the issue
-            and restore all deterministic checks. Do not commit, push, open/merge PRs, change
-            GitHub settings, or access any local AIDI, Forgejo, VM, self-hosted runner, queue,
-            database, file or state outside this checkout.
-            "               -s               --add-dir=/tmp               --allow-tool='read,write,shell(go:*),shell(gofmt:*),shell(python:*),shell(npm:*),shell(node:*),shell(git status),shell(git diff:*),shell(grep:*),shell(find:*),shell(mkdir:*)'               --no-ask-user
-
-            test -z "$(gofmt -l .)"
-            go mod verify
-            go vet ./...
-            go test -race ./...
-            python -m compileall -q workers/src workers/tests
-            PYTHONPATH=workers/src python -m unittest discover -s workers/tests -v
-            (
-              cd web
-              npm ci --ignore-scripts --no-audit --no-fund
-              npm run build
-            )
-            rm -f web/tsconfig.tsbuildinfo
-
-            test -n "$(git status --porcelain)"
-            git add -A
-            git commit -m "fix(release-a): address CI findings (#$issue)"
-            git push origin "HEAD:$branch"
-            sha="$(git rev-parse HEAD)"
-
-            dispatch_and_wait "$sha"
-            [[ "$WATCH_STATUS" -eq 0 ]]
+            echo "Exact-head CI failed. No coding provider is configured, so autonomous source repair is disabled." >&2
+            exit 1
           fi
 
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
@@ -720,12 +620,11 @@ jobs:
         env:
           RECOVERED: ${{ steps.recover.outputs.recovered }}
           DEV_CI_RUN: ${{ steps.devci.outputs.run_id }}
-          PLAN_ISSUE: ${{ steps.plan.outputs.issue }}
         run: |
           set -euo pipefail
 
           progressed=false
-          if [[ "$RECOVERED" == "true" || -n "$DEV_CI_RUN" || -n "$PLAN_ISSUE" ]]; then
+          if [[ "$RECOVERED" == "true" || -n "$DEV_CI_RUN" ]]; then
             progressed=true
           fi
           [[ "$progressed" == "true" ]] || exit 0
