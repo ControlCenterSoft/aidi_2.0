@@ -74,7 +74,10 @@ update_circuit() {
   repeats=0; circuit=false
   if [[ -n "$fingerprint" ]]; then
     if [[ "$fingerprint" == "$old_fp" ]]; then repeats=$((old_repeats+1)); else repeats=1; fi
-    if [[ "$repeats" -ge 3 ]]; then circuit=true; fi
+
+    if [[ "$repeats" -ge 3 ]]; then
+      circuit=true
+    fi
   fi
   state="$(jq -n --arg fp "$fingerprint" --arg outcome "$outcome" --argjson repeats "$repeats" --argjson circuit "$circuit" --arg updated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{last_fingerprint:$fp,repeat_count:$repeats,circuit_open:$circuit,last_outcome:$outcome,updated_at:$updated}')"
   encoded="$(printf '%s\n' "$state" | base64 -w0)"
@@ -264,6 +267,22 @@ if [[ "$latest_conclusion" == "success" && -n "$latest_created" ]]; then
     emit
     exit 0
   fi
+fi
+
+provider_enabled="false"
+provider_name="disabled"
+if provider_config="$(gh api "repos/$REPO/contents/.automation/coding-provider.json?ref=main" 2>/dev/null)"; then
+  provider_body="$(jq -r '.content' <<<"$provider_config" | base64 -d)"
+  provider_enabled="$(jq -r '.enabled // false' <<<"$provider_body")"
+  provider_name="$(jq -r '.provider // "disabled"' <<<"$provider_body")"
+fi
+
+if [[ "$provider_enabled" != "true" ]]; then
+  kick=false
+  fingerprint=""
+  outcome="coding_provider_disabled"
+  emit
+  exit 0
 fi
 
 kick=true
