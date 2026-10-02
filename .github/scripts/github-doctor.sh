@@ -74,7 +74,13 @@ update_circuit() {
   repeats=0; circuit=false
   if [[ -n "$fingerprint" ]]; then
     if [[ "$fingerprint" == "$old_fp" ]]; then repeats=$((old_repeats+1)); else repeats=1; fi
-    if [[ "$repeats" -ge 3 ]]; then circuit=true; fi
+
+    # Provider quota exhaustion is an external capacity pause, not a broken
+    # recovery loop. Keep counting observations for diagnostics, but never open
+    # the Doctor circuit for this fingerprint.
+    if [[ "$fingerprint" != "copilot_monthly_quota_exhausted" && "$repeats" -ge 3 ]]; then
+      circuit=true
+    fi
   fi
   state="$(jq -n --arg fp "$fingerprint" --arg outcome "$outcome" --argjson repeats "$repeats" --argjson circuit "$circuit" --arg updated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{last_fingerprint:$fp,repeat_count:$repeats,circuit_open:$circuit,last_outcome:$outcome,updated_at:$updated}')"
   encoded="$(printf '%s\n' "$state" | base64 -w0)"
@@ -246,6 +252,7 @@ if [[ "$candidate_count" -gt 1 ]]; then
 fi
 
 latest_core="$(gh run list --repo "$REPO" --workflow autonomous-core.yml --limit 1 --json databaseId,status,conclusion,createdAt | jq '.[0] // {}')"
+latest_id="$(jq -r '.databaseId // empty' <<<"$latest_core")"
 latest_status="$(jq -r '.status // empty' <<<"$latest_core")"
 latest_conclusion="$(jq -r '.conclusion // empty' <<<"$latest_core")"
 latest_created="$(jq -r '.createdAt // empty' <<<"$latest_core")"
@@ -261,6 +268,26 @@ if [[ "$latest_conclusion" == "success" && -n "$latest_created" ]]; then
   age=$(( $(date -u +%s) - created_epoch ))
   if (( age >= 0 && age < 1200 )); then
     outcome="healthy_recent_core"
+    emit
+    exit 0
+  fi
+fi
+
+if [[ "$latest_conclusion" == "failure" && -n "$latest_id" ]]; then
+  failed_log="$(gh run view "$latest_id" --repo "$REPO" --log-failed 2>&1 || true)"
+  if grep -Eiq 'exceeded your monthly quota|monthly quota[^[:alnum:]]*exceed|quota[^[:alnum:]]*(exhaust|exceed)|premium requests[^[:alnum:]]*(exhaust|exceed)' <<<"$failed_log"; then
+    fingerprint="copilot_monthly_quota_exhausted"
+
+    # A failed Core immediately dispatches Doctor. Do not bounce straight back
+    # into Core and burn Actions minutes while the external monthly quota is
+    # still unavailable. Only a scheduled Doctor run performs one bounded probe.
+    if [[ "${GITHUB_EVENT_NAME:-}" == "schedule" ]]; then
+      kick=true
+      outcome="probe_provider_quota"
+    else
+      kick=false
+      outcome="blocked_provider_quota"
+    fi
     emit
     exit 0
   fi
