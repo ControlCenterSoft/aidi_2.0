@@ -1,0 +1,9 @@
+{
+  "run_id": "36965532766",
+  "attempt": "1",
+  "fingerprint": "copilot_monthly_quota_exhausted",
+  "outcome": "blocked_provider_quota",
+  "kick_core": false,
+  "circuit_open": false,
+  "observed_at": "2026-10-02T04:40:09Z"
+}
