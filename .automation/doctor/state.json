@@ -1,7 +1,7 @@
 {
-  "last_fingerprint": "copilot_monthly_quota_exhausted",
-  "repeat_count": 2,
+  "last_fingerprint": "",
+  "repeat_count": 0,
   "circuit_open": false,
-  "last_outcome": "blocked_provider_quota",
-  "updated_at": "2026-10-02T04:40:08Z"
+  "last_outcome": "coding_provider_disabled",
+  "updated_at": "2026-10-02T05:03:59Z"
 }
