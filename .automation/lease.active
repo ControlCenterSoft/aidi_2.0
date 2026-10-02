@@ -1,0 +1,8 @@
+{
+  "owner": "chatgpt-external-118-20261002t2140z",
+  "started_at": "2026-10-02T21:40:00Z",
+  "lease_until": "2026-10-02T21:58:00Z",
+  "task_role": "AIDI ChatGPT external coding executor",
+  "issue": 118,
+  "stable_key": "A11-001"
+}
