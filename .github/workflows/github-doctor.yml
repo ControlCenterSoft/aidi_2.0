@@ -3,7 +3,8 @@ name: AIDI GitHub Doctor
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0,30 * * * *"
+    # Stagger the watchdog away from peak :00/:30 scheduler load.
+    - cron: "19,49 * * * *"
   push:
     branches:
       - automation-control

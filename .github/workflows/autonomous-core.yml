@@ -8,7 +8,9 @@ on:
     paths:
       - '.automation/kicks/*.trigger'
   schedule:
-    - cron: "5,15,25,35,45,55 * * * *"
+    # Watchdog only. Normal healthy cycles chain themselves via workflow_dispatch.
+    # Keep this intentionally low-frequency and away from the top of the hour.
+    - cron: "8,38 * * * *"
 
 permissions:
   actions: write
