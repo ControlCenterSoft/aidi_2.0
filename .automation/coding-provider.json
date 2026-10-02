@@ -1,5 +1,8 @@
 {
-  "provider": "disabled",
-  "enabled": false,
-  "reason": "No GitHub coding provider is configured. Autonomous product writes are paused until an approved replacement executor is configured."
+  "provider": "chatgpt-connector",
+  "enabled": true,
+  "mode": "external_handoff",
+  "handoff_branch": "automation-control",
+  "handoff_path": ".automation/selected-card.json",
+  "reason": "Canonical selection and promotion remain in GitHub Autonomous Core; bounded source implementation is delegated to the isolated ChatGPT GitHub connector."
 }
