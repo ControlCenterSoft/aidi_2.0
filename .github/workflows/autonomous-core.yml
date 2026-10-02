@@ -296,15 +296,15 @@ jobs:
           test -n "$dev_run"
           gh run watch "$dev_run" --repo "$REPO" --exit-status
           echo "development reconciled to main $main_sha with explicit CI on both branches."
-      - name: Hold blocking review when coding provider is disabled
+      - name: Hold blocking review for external coding provider
         id: reviewrepair
         if: steps.lease.outputs.acquired == 'true' && steps.recover.outputs.repair_needed == 'true'
         shell: bash
         run: |
           set -euo pipefail
           echo "ready=false" >> "$GITHUB_OUTPUT"
-          echo "Blocking review requires source changes, but no GitHub coding provider is configured."
-          echo "The existing PR is left untouched for a future approved executor."
+          echo "Blocking review requires source changes; leaving the PR for the configured external coding executor."
+          echo "The existing PR is left untouched so the external executor can repair the exact head."
 
       - name: Verify previous GitHub cycle is complete
         id: previous
@@ -698,7 +698,7 @@ jobs:
           [[ "$progressed" == "true" ]] || exit 0
 
           open_prs="$(gh pr list --repo "$REPO" --state open --limit 100 --json headRefName | \
-            jq '[.[] | select(.headRefName | startswith("automation/"))] | length')"
+            jq '[.[] | select(.headRefName | (startswith("automation/") or startswith("chatgpt/")))] | length')"
           if [[ "$open_prs" -gt 0 ]]; then
             echo "Next cycle not queued: open automation PRs=$open_prs"
             exit 0
