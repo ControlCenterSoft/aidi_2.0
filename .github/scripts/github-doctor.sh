@@ -134,7 +134,7 @@ if [[ "$active" -gt 0 ]]; then
 fi
 
 prs="$(gh pr list --repo "$REPO" --state open --limit 100 --json number,headRefName |
-  jq '[.[] | select(.headRefName | startswith("automation/"))]')"
+  jq '[.[] | select(.headRefName | (startswith("automation/") or startswith("chatgpt/")))]')"
 count="$(jq 'length' <<<"$prs")"
 
 if [[ "$count" -gt 1 ]]; then

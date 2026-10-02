@@ -118,7 +118,7 @@ jobs:
 
           prs="$(gh pr list --repo "$REPO" --state open --limit 100 \
             --json number,headRefName | \
-            jq '[.[] | select(.headRefName | startswith("automation/"))]')"
+            jq '[.[] | select(.headRefName | (startswith("automation/") or startswith("chatgpt/")))]')"
           count="$(jq 'length' <<<"$prs")"
 
           if [[ "$count" -eq 0 ]]; then
@@ -257,15 +257,54 @@ jobs:
           echo "pr=$pr" >> "$GITHUB_OUTPUT"
           echo "main_sha=$main_sha" >> "$GITHUB_OUTPUT"
 
-      - name: Hold blocking review when coding provider is disabled
+      - name: Reconcile development after external merge
+        if: steps.lease.outputs.acquired == 'true' && steps.recover.outputs.recovered != 'true' && steps.recover.outputs.repair_needed != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main development
+          main_sha="$(git rev-parse origin/main)"
+          dev_sha="$(git rev-parse origin/development)"
+
+          [[ "$main_sha" != "$dev_sha" ]] || exit 0
+          git merge-base --is-ancestor origin/development origin/main || {
+            echo "development is not an ancestor of main; refusing non-fast-forward reconciliation." >&2
+            exit 1
+          }
+
+          gh workflow run ci.yml --repo "$REPO" --ref main
+          main_run=""
+          for _ in $(seq 1 30); do
+            main_run="$(gh run list --repo "$REPO" --workflow ci.yml --branch main --event workflow_dispatch --limit 20 \
+              --json databaseId,headSha | jq -r --arg sha "$main_sha" '.[] | select(.headSha == $sha) | .databaseId' | head -n1)"
+            [[ -n "$main_run" ]] && break
+            sleep 4
+          done
+          test -n "$main_run"
+          gh run watch "$main_run" --repo "$REPO" --exit-status
+
+          git push origin "refs/remotes/origin/main:refs/heads/development"
+
+          gh workflow run ci.yml --repo "$REPO" --ref development
+          dev_run=""
+          for _ in $(seq 1 30); do
+            dev_run="$(gh run list --repo "$REPO" --workflow ci.yml --branch development --event workflow_dispatch --limit 20 \
+              --json databaseId,headSha | jq -r --arg sha "$main_sha" '.[] | select(.headSha == $sha) | .databaseId' | head -n1)"
+            [[ -n "$dev_run" ]] && break
+            sleep 4
+          done
+          test -n "$dev_run"
+          gh run watch "$dev_run" --repo "$REPO" --exit-status
+          echo "development reconciled to main $main_sha with explicit CI on both branches."
+      - name: Hold blocking review for external coding provider
         id: reviewrepair
         if: steps.lease.outputs.acquired == 'true' && steps.recover.outputs.repair_needed == 'true'
         shell: bash
         run: |
           set -euo pipefail
           echo "ready=false" >> "$GITHUB_OUTPUT"
-          echo "Blocking review requires source changes, but no GitHub coding provider is configured."
-          echo "The existing PR is left untouched for a future approved executor."
+          echo "Blocking review requires source changes; leaving the PR for the configured external coding executor."
+          echo "The existing PR is left untouched so the external executor can repair the exact head."
 
       - name: Verify previous GitHub cycle is complete
         id: previous
@@ -277,7 +316,7 @@ jobs:
           # Product work is single-slice. An existing automation PR or another
           # live GitHub execution must complete before a new canonical card is
           # selected.
-          prs="$(gh pr list --repo "$REPO" --state open --limit 100             --json headRefName,baseRefName |             jq '[.[] | select((.headRefName | startswith("automation/")) or .headRefName == "development")] | length')"
+          prs="$(gh pr list --repo "$REPO" --state open --limit 100             --json headRefName,baseRefName |             jq '[.[] | select((.headRefName | (startswith("automation/") or startswith("chatgpt/"))) or .headRefName == "development")] | length')"
           runs="$(gh run list --repo "$REPO" --limit 100             --json databaseId,status |             jq --argjson current "$GITHUB_RUN_ID"               '[.[] | select((.status == "queued" or .status == "in_progress") and .databaseId != $current)] | length')"
 
           # Pre-manifest bot-created Issues are durable legacy recovery state.
@@ -359,10 +398,39 @@ jobs:
             exit 0
           fi
 
+          if [[ "$provider" == "chatgpt-connector" ]]; then
+            handoff_path="$(jq -r '.handoff_path // ".automation/selected-card.json"' "$config")"
+            issue="${{ steps.plan.outputs.issue }}"
+            key="${{ steps.plan.outputs.key }}"
+            title="${{ steps.plan.outputs.title }}"
+            main_sha="$(git rev-parse HEAD)"
+            handoff="$(jq -n \
+              --arg issue "$issue" \
+              --arg key "$key" \
+              --arg title "$title" \
+              --arg main_sha "$main_sha" \
+              --arg selected_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              '{issue:($issue|tonumber),stable_key:$key,title:$title,main_sha:$main_sha,selected_at:$selected_at,executor:"chatgpt-connector"}')"
+            encoded="$(printf '%s\n' "$handoff" | base64 -w0)"
+            current_sha="$(gh api "repos/$REPO/contents/$handoff_path?ref=automation-control" --jq '.sha' 2>/dev/null || true)"
+            if [[ -n "$current_sha" ]]; then
+              gh api --method PUT "repos/$REPO/contents/$handoff_path" \
+                -f message="chore(automation): publish external executor handoff $key" \
+                -f content="$encoded" -f sha="$current_sha" -f branch="automation-control" >/dev/null
+            else
+              gh api --method PUT "repos/$REPO/contents/$handoff_path" \
+                -f message="chore(automation): publish external executor handoff $key" \
+                -f content="$encoded" -f branch="automation-control" >/dev/null
+            fi
+            echo "external=true" >> "$GITHUB_OUTPUT"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Published canonical $key / Issue #$issue for isolated ChatGPT connector execution."
+            exit 0
+          fi
+
           echo "ready=false" >> "$GITHUB_OUTPUT"
           echo "Provider '$provider' is enabled in configuration but no executor adapter is installed in this workflow." >&2
           exit 1
-
       - name: Create isolated automation branch
         if: steps.executor.outputs.ready == 'true'
         id: branch
@@ -630,7 +698,7 @@ jobs:
           [[ "$progressed" == "true" ]] || exit 0
 
           open_prs="$(gh pr list --repo "$REPO" --state open --limit 100 --json headRefName | \
-            jq '[.[] | select(.headRefName | startswith("automation/"))] | length')"
+            jq '[.[] | select(.headRefName | (startswith("automation/") or startswith("chatgpt/")))] | length')"
           if [[ "$open_prs" -gt 0 ]]; then
             echo "Next cycle not queued: open automation PRs=$open_prs"
             exit 0

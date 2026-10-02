@@ -31,14 +31,14 @@ Acquisition creates `.automation/lease.active` without a prior blob SHA. GitHub 
 
 The workflow has watchdog start opportunities at `:08/:38`. Healthy write cycles may explicitly hand off to the next cycle through `workflow_dispatch`; watchdog starts are only a fallback. The existence-based lease and previous-work checks ensure that overlapping starts do not create parallel conflicting write cycles.
 
-The coding provider is controlled by `.automation/coding-provider.json`. When `enabled=false`, product-write execution is intentionally paused: the Core may validate/select the next canonical card, but it must not create an implementation branch, edit source, or open a product PR.
+The coding provider is controlled by `.automation/coding-provider.json`. The supported external provider is `chatgpt-connector`: Autonomous Core remains the canonical selector, lease/recovery authority and promotion controller, while it publishes the exact selected card to `automation-control:.automation/selected-card.json` for bounded implementation through the isolated ChatGPT GitHub connector. When `enabled=false`, product-write execution is intentionally paused.
 
 1. acquire the GitHub lease;
 2. verify that no previous automation PR or queued/in-progress CI is active;
 3. use the approved `docs/SPEC.md`, `docs/ROADMAP.md`, `docs/FOUNDATION.md` and current repository state to select one dependency-ready slice;
 4. read the coding-provider configuration;
 5. if the provider is disabled, release the lease without product writes;
-6. when an approved executor adapter is configured, create an isolated `automation/*` branch and implement exactly one bounded slice;
+6. for `chatgpt-connector`, publish the selected canonical card as a durable handoff and let the isolated connector implement exactly that bounded slice on a `chatgpt/*` branch; native `automation/*` execution remains reserved for an installed in-workflow adapter;
 7. run deterministic checks locally on the GitHub-hosted runner;
 8. create a draft PR;
 9. explicitly dispatch the full `AIDI CI` workflow for the automation branch;
@@ -74,4 +74,4 @@ Any future coding executor is not permitted to perform GitHub writes itself. Git
 
 ## Scheduled ChatGPT task role
 
-ChatGPT scheduled tasks are the supervisory/control plane for this GitHub-only contour: planning, observation, review, recovery analysis, architecture/evidence audits, and the hourly user report. The authoritative product-write execution path is the GitHub-hosted `AIDI Autonomous Core` workflow. This avoids making connector-side write approvals a dependency of autonomous development.
+Autonomous Core is the authoritative canonical selector, lease/recovery authority and promotion controller. The isolated ChatGPT GitHub connector is the configured external coding executor: it may implement only the card published by Core in `.automation/selected-card.json`, must use `chatgpt/*` branches, and must never bypass exact-head CI or the repository lease. A single hourly connector task performs bounded implementation/recovery; the hourly user report remains read-only.
