@@ -1,0 +1,8 @@
+{
+  "issue": 52,
+  "stable_key": "A0-003",
+  "title": "[A0-003] Initialize Go workspace/modules",
+  "main_sha": "dc286333bbffccbd874c187897f29d3aea33c80b",
+  "selected_at": "2026-10-03T07:36:31Z",
+  "executor": "chatgpt-connector"
+}
