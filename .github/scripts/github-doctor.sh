@@ -208,25 +208,55 @@ if [[ "$count" -eq 1 ]]; then
 fi
 
 issues="$(gh api --paginate "repos/$REPO/issues?state=open&per_page=100" | \
-  jq -s '[.[][] | select(has("pull_request") | not) | select(.user.login=="github-actions[bot]" or ((.body // "") | contains("aidi-release-a-manifest:")))] | map({number:.number})')"
+  jq -s '[.[][] | select(has("pull_request") | not) | select(.user.login=="github-actions[bot]" or ((.body // "") | contains("aidi-release-a-manifest:")))] | map({number:.number,title:.title})')"
 branches="$(gh api --paginate --slurp "repos/$REPO/branches?per_page=100" | jq 'add')"
 candidate_issue=""
 candidate_branch=""
 candidate_count=0
 
-while IFS= read -r issue; do
+while IFS=$'\t' read -r issue title; do
   [[ -n "$issue" ]] || continue
-  matches="$(jq --arg p "automation/core-$issue-" '[.[] | select(.name | startswith($p))] | map(.name)' <<<"$branches")"
-  if [[ "$(jq 'length' <<<"$matches")" -eq 1 ]]; then
-    branch="$(jq -r '.[0]' <<<"$matches")"
-    existing="$(gh pr list --repo "$REPO" --state all --head "$branch" --limit 10 --json number | jq 'length')"
-    if [[ "$existing" -eq 0 ]]; then
-      candidate_count=$((candidate_count+1))
-      candidate_issue="$issue"
-      candidate_branch="$branch"
-    fi
+
+  stable_key="$(sed -nE 's/^\[([^]]+)\].*/\1/p' <<<"$title")"
+  stable_slug="$(tr '[:upper:]' '[:lower:]' <<<"$stable_key")"
+  native_prefix="automation/core-$issue-"
+  chatgpt_prefix=""
+  if [[ -n "$stable_slug" ]]; then
+    chatgpt_prefix="chatgpt/$stable_slug-$issue-"
   fi
-done < <(jq -r '.[].number' <<<"$issues")
+
+  matches="$(jq --arg native "$native_prefix" --arg chatgpt "$chatgpt_prefix" '
+    [.[] |
+      select(
+        (.name | startswith($native)) or
+        (($chatgpt | length) > 0 and (.name | startswith($chatgpt)))
+      ) |
+      {name:.name,sha:.commit.sha}
+    ]' <<<"$branches")"
+
+  newest_branch=""
+  newest_epoch=0
+  while IFS= read -r row; do
+    [[ -n "$row" ]] || continue
+    branch="$(jq -r '.name' <<<"$row")"
+    sha="$(jq -r '.sha' <<<"$row")"
+    existing="$(gh pr list --repo "$REPO" --state all --head "$branch" --limit 10 --json number | jq 'length')"
+    [[ "$existing" -eq 0 ]] || continue
+
+    commit_date="$(gh api "repos/$REPO/commits/$sha" --jq '.commit.committer.date // .commit.author.date // empty' 2>/dev/null || true)"
+    commit_epoch="$(date -u -d "$commit_date" +%s 2>/dev/null || echo 0)"
+    if (( commit_epoch >= newest_epoch )); then
+      newest_epoch="$commit_epoch"
+      newest_branch="$branch"
+    fi
+  done < <(jq -c '.[]' <<<"$matches")
+
+  if [[ -n "$newest_branch" ]]; then
+    candidate_count=$((candidate_count+1))
+    candidate_issue="$issue"
+    candidate_branch="$newest_branch"
+  fi
+done < <(jq -r '.[] | [.number,.title] | @tsv' <<<"$issues")
 
 if [[ "$candidate_count" -eq 1 ]]; then
   title="$(gh issue view "$candidate_issue" --repo "$REPO" --json title --jq '.title')"
