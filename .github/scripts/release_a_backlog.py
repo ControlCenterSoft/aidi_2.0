@@ -189,6 +189,12 @@ def select_ready(cards: list[Card], registry: dict[str, dict]) -> dict:
     if unknown_blocked:
         raise BacklogError(f"github-only blocklist contains unknown keys: {unknown_blocked}")
 
+    # A GitHub-only blocked card is an explicitly deferred external prerequisite:
+    # this executor must never select or close it, but it must not deadlock every
+    # downstream card that can be implemented and validated entirely in GitHub.
+    # Canonical completion remains based on actually closed Issues only.
+    execution_satisfied = closed | blocked
+
     ready: list[Card] = []
     for card in cards:
         if card.kind != "I":
@@ -198,16 +204,22 @@ def select_ready(cards: list[Card], registry: dict[str, dict]) -> dict:
             continue
         if card.key in blocked:
             continue
-        if all(dep in closed for dep in card.dependencies):
+        if all(dep in execution_satisfied for dep in card.dependencies):
             ready.append(card)
 
     if not ready:
         implementation_done = all(
             registry[c.key].get("state") == "closed" for c in cards if c.kind == "I"
         )
+        github_only_implementation_done = all(
+            registry[c.key].get("state") == "closed" or c.key in blocked
+            for c in cards
+            if c.kind == "I"
+        )
         return {
             "ready": False,
             "implementation_complete": implementation_done,
+            "github_only_implementation_complete": github_only_implementation_done,
             "closed_count": len(closed),
             "total_count": len(cards),
             "github_only_blocked": sorted(blocked),
@@ -215,12 +227,16 @@ def select_ready(cards: list[Card], registry: dict[str, dict]) -> dict:
 
     card = min(ready, key=lambda c: c.order)
     issue = registry[card.key]
+    deferred_dependencies = [
+        dep for dep in card.dependencies if dep in blocked and dep not in closed
+    ]
     return {
         "ready": True,
         "key": card.key,
         "issue": issue["number"],
         "title": card.title,
         "dependencies": list(card.dependencies),
+        "github_only_deferred_dependencies": deferred_dependencies,
         "closed_count": len(closed),
         "total_count": len(cards),
         "github_only_blocked": sorted(blocked),
