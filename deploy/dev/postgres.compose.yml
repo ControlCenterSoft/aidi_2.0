@@ -1,0 +1,18 @@
+name: aidi-postgres-foundation
+
+services:
+  postgres:
+    image: postgres:16.12-bookworm
+    environment:
+      POSTGRES_DB: aidi
+      POSTGRES_USER: aidi
+      POSTGRES_PASSWORD: aidi-dev-test-only
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aidi -d aidi"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    restart: "no"
