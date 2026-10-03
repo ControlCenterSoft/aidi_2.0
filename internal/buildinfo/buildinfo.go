@@ -26,9 +26,9 @@ func New(version, commit, buildTime, provenance string) Info {
 		provenance = "unknown"
 	}
 	return Info{
-		Version: version,
-		Commit: commit,
-		BuildTime: buildTime,
+		Version:    version,
+		Commit:     commit,
+		BuildTime:  buildTime,
 		Provenance: provenance,
 	}
 }
