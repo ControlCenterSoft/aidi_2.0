@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,12 +18,22 @@ import (
 )
 
 var (
-	version   = "dev"
-	commit    = "unknown"
-	buildTime = "unknown"
+	version    = "dev"
+	commit     = "unknown"
+	buildTime  = "unknown"
+	provenance = "unknown"
 )
 
 func main() {
+	build := buildinfo.New(version, commit, buildTime, provenance)
+	if buildinfo.VersionRequested(os.Args) {
+		if err := buildinfo.WriteJSON(os.Stdout, build); err != nil {
+			fmt.Fprintln(os.Stderr, "write build metadata:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("invalid configuration", "error", err)
@@ -32,7 +43,6 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel(cfg.LogLevel)}))
 	slog.SetDefault(logger)
 
-	build := buildinfo.New(version, commit, buildTime)
 	var ready atomic.Bool
 
 	mux := http.NewServeMux()
@@ -52,6 +62,7 @@ func main() {
 			"version", build.Version,
 			"commit", build.Commit,
 			"build_time", build.BuildTime,
+			"provenance", build.Provenance,
 		)
 		ready.Store(true)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
