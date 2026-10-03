@@ -1,0 +1,8 @@
+{
+  "issue": 62,
+  "stable_key": "A2-001",
+  "title": "[A2-001] PostgreSQL 16 foundation profile",
+  "main_sha": "9c0f5f66417f8f9afd15f6e40cba945619d9c675",
+  "selected_at": "2026-10-03T20:00:38Z",
+  "executor": "chatgpt-connector"
+}
