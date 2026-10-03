@@ -3,6 +3,6 @@
   "stable_key": "A11-002",
   "title": "[A11-002] Orphan/stale lease detection",
   "main_sha": "20de1f7beb8d6c4d5751fd969620a029f2b61b94",
-  "selected_at": "2026-10-03T00:28:19Z",
+  "selected_at": "2026-10-03T05:22:41Z",
   "executor": "chatgpt-connector"
 }
