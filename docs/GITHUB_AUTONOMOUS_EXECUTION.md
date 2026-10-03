@@ -52,6 +52,8 @@ The coding provider is controlled by `.automation/coding-provider.json`. The sup
 
 Release A selection remains deterministic and independent of the coding provider. A disabled provider is a normal paused state, not a recovery failure and not a reason to open the Doctor circuit.
 
+Cards listed in `.automation/backlog/release-a/github-only-blocked.txt` are deferred external prerequisites. The isolated GitHub executor never selects or closes those cards, and they do not count as canonical completion. For GitHub-only dependency readiness, however, they are treated as execution-satisfied so an unavailable external prerequisite cannot deadlock downstream work that is fully implementable and testable inside this repository. The selector reports any such deferred dependency explicitly in `github_only_deferred_dependencies`.
+
 No source-repair fallback is performed when the provider is disabled. Failed exact-head CI or blocking review findings remain durable recovery state until an approved executor is configured.
 
 Because `web/package-lock.json` is pinned in the repository, autonomous pre-PR checks use `npm ci` directly. They do not regenerate the lockfile.

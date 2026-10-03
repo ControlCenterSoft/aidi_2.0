@@ -371,6 +371,7 @@ jobs:
           issue="$(jq -r '.issue' <<<"$selection")"
           key="$(jq -r '.key' <<<"$selection")"
           title="$(jq -r '.title' <<<"$selection")"
+          deferred="$(jq -r '(.github_only_deferred_dependencies // []) | join(",")' <<<"$selection")"
 
           gh issue view "$issue" --repo "$REPO" --json body --jq '.body' > /tmp/aidi-plan.md
           test -s /tmp/aidi-plan.md
@@ -378,7 +379,11 @@ jobs:
           echo "issue=$issue" >> "$GITHUB_OUTPUT"
           echo "key=$key" >> "$GITHUB_OUTPUT"
           echo "title=$title" >> "$GITHUB_OUTPUT"
-          echo "Selected canonical READY card $key as GitHub Issue #$issue."
+          if [[ -n "$deferred" ]]; then
+            echo "Selected canonical READY card $key as GitHub Issue #$issue with deferred external prerequisite(s): $deferred."
+          else
+            echo "Selected canonical READY card $key as GitHub Issue #$issue."
+          fi
 
       - name: Clear completed external handoff
         if: steps.lease.outputs.acquired == 'true' && steps.previous.outputs.ready == 'true'
