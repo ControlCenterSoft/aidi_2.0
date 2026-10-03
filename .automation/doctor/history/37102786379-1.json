@@ -1,0 +1,9 @@
+{
+  "run_id": "37102786379",
+  "attempt": "1",
+  "fingerprint": "",
+  "outcome": "orphan_issue_branch_pr_recovered",
+  "kick_core": true,
+  "circuit_open": false,
+  "observed_at": "2026-10-03T06:21:52Z"
+}
