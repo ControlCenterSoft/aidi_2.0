@@ -1,8 +1,0 @@
-{
-  "issue": 53,
-  "stable_key": "A0-004",
-  "title": "[A0-004] Reproducible binary build",
-  "main_sha": "80ef4e6fb17f5659ebd19050a3cb40799ecdaa71",
-  "selected_at": "2026-10-03T10:41:00Z",
-  "executor": "chatgpt-connector"
-}
