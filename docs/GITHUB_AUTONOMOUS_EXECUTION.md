@@ -25,7 +25,7 @@ The authoritative cross-cycle mutex is now existence-based:
 - lease duration: 45 minutes;
 - legacy `.automation/lock.json` is status/history only and is not used for mutual exclusion.
 
-Acquisition creates `.automation/lease.active` without a prior blob SHA. GitHub permits only one creator for the path, so a competing writer loses safely. Release verifies the owner and deletes the exact current blob. An expired lease is removed only when no matching open automation PR or queued/in-progress GitHub run remains. Completed-cycle evidence is append-only under `.automation/history/`.
+Acquisition creates `.automation/lease.active` without a prior blob SHA. GitHub permits only one creator for the path, so a competing writer loses safely. Release verifies the owner and deletes the exact current blob. An expired lease is removed when its owner is no longer represented by queued/in-progress GitHub work. An open automation PR is durable recoverable state and does not keep an expired process lease alive. Completed-cycle evidence is append-only under `.automation/history/`.
 
 ## Cycle
 
@@ -38,7 +38,7 @@ The coding provider is controlled by `.automation/coding-provider.json`. The sup
 3. use the approved `docs/SPEC.md`, `docs/ROADMAP.md`, `docs/FOUNDATION.md` and current repository state to select one dependency-ready slice;
 4. read the coding-provider configuration;
 5. if the provider is disabled, release the lease without product writes;
-6. for `chatgpt-connector`, publish the selected canonical card as a durable handoff and let the isolated connector implement exactly that bounded slice on a `chatgpt/*` branch; native `automation/*` execution remains reserved for an installed in-workflow adapter;
+6. for `chatgpt-connector`, publish the selected canonical card as a durable handoff and let the isolated connector implement exactly that bounded slice on a `chatgpt/*` branch; native `automation/*` execution remains reserved for an installed in-workflow adapter; if the connector leaves a branch without a PR, GitHub Doctor reconstructs the missing draft PR from the newest unlinked retry branch for that single canonical issue;
 7. run deterministic checks locally on the GitHub-hosted runner;
 8. create a draft PR;
 9. explicitly dispatch the full `AIDI CI` workflow for the automation branch;
@@ -69,7 +69,7 @@ The autonomous workflow declares only the repository permissions it needs:
 - `issues: write` — create the bounded work item;
 - `pull-requests: write` — create/transition/merge the PR;
 
-Any future coding executor is not permitted to perform GitHub writes itself. GitHub writes are performed by deterministic workflow steps after validation.
+The external `chatgpt-connector` may create or update only the bounded `chatgpt/*` implementation branch for the card published by Autonomous Core. Lease ownership, recovery decisions, PR promotion, exact-head CI dispatch, issue closure, merge, and `main`/`development` updates remain deterministic Core/Doctor responsibilities.
 
 
 ## Scheduled ChatGPT task role
