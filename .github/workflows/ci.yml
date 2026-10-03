@@ -27,6 +27,12 @@ jobs:
         run: go vet ./...
       - name: Unit tests
         run: go test -race -coverprofile=coverage.out ./...
+      - name: Minimal Release A command entry points
+        run: |
+          go build -trimpath -o /tmp/aidi-control ./cmd/aidi-control
+          go build -trimpath -o /tmp/aidi-node-agent ./cmd/aidi-node-agent
+          go build -trimpath -o /tmp/aidi-installer ./cmd/aidi-installer
+          go build -trimpath -o /tmp/aidi-admin ./cmd/aidi-admin
       - name: Build
         run: |
           mkdir -p dist
