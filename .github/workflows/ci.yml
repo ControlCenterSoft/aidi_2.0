@@ -23,8 +23,10 @@ jobs:
         run: test -z "$(gofmt -l .)"
       - name: Module integrity
         run: go mod verify
-      - name: Vet
+      - name: Static analysis
         run: go vet ./...
+      - name: Compile packages
+        run: go build ./...
       - name: Unit tests
         run: go test -race -coverprofile=coverage.out ./...
       - name: Minimal Release A command entry points
@@ -56,6 +58,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Verify CI quality-gate contract
+        run: python .github/scripts/test_ci_quality_gates.py
       - name: Validate approved monorepo structure
         run: python .github/scripts/test_monorepo_structure.py
       - name: Validate approved Release A backlog graph
