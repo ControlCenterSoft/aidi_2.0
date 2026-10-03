@@ -371,6 +371,7 @@ jobs:
           issue="$(jq -r '.issue' <<<"$selection")"
           key="$(jq -r '.key' <<<"$selection")"
           title="$(jq -r '.title' <<<"$selection")"
+          deferred="$(jq -r '(.github_only_deferred_dependencies // []) | join(",")' <<<"$selection")"
 
           gh issue view "$issue" --repo "$REPO" --json body --jq '.body' > /tmp/aidi-plan.md
           test -s /tmp/aidi-plan.md
@@ -378,7 +379,11 @@ jobs:
           echo "issue=$issue" >> "$GITHUB_OUTPUT"
           echo "key=$key" >> "$GITHUB_OUTPUT"
           echo "title=$title" >> "$GITHUB_OUTPUT"
-          echo "Selected canonical READY card $key as GitHub Issue #$issue."
+          if [[ -n "$deferred" ]]; then
+            echo "Selected canonical READY card $key as GitHub Issue #$issue with deferred external prerequisite(s): $deferred."
+          else
+            echo "Selected canonical READY card $key as GitHub Issue #$issue."
+          fi
 
       - name: Clear completed external handoff
         if: steps.lease.outputs.acquired == 'true' && steps.previous.outputs.ready == 'true'
@@ -389,16 +394,20 @@ jobs:
           config=".automation/coding-provider.json"
           test -f "$config"
           handoff_path="$(jq -r '.handoff_path // ".automation/selected-card.json"' "$config")"
-          current="$(gh api "repos/$REPO/contents/$handoff_path?ref=automation-control" 2>/dev/null || true)"
-          [[ -n "$current" ]] || exit 0
-
-          current_sha="$(jq -r '.sha' <<<"$current")"
-          handoff="$(jq -r '.content' <<<"$current" | base64 -d)"
-          handoff_issue="$(jq -r '.issue // empty' <<<"$handoff")"
-          [[ "$handoff_issue" =~ ^[0-9]+$ ]] || {
-            echo "External handoff has no valid issue number; preserving it for explicit recovery." >&2
+          if ! current="$(gh api "repos/$REPO/contents/$handoff_path?ref=automation-control" 2>/dev/null)"; then
+            echo "No external handoff is present; nothing to clear."
             exit 0
-          }
+          fi
+
+          current_sha="$(jq -er '.sha' <<<"$current")"
+          if ! handoff="$(jq -er '.content' <<<"$current" | base64 -d 2>/dev/null)"; then
+            echo "Existing external handoff content is unreadable; it will be replaced by the newly selected card."
+            exit 0
+          fi
+          if ! handoff_issue="$(jq -er '.issue | select(type == "number")' <<<"$handoff" 2>/dev/null)"; then
+            echo "Existing external handoff JSON is invalid or has no numeric issue; it will be replaced by the newly selected card."
+            exit 0
+          fi
 
           issue_state="$(gh issue view "$handoff_issue" --repo "$REPO" --json state --jq '.state' 2>/dev/null || true)"
           if [[ "$issue_state" == "CLOSED" ]]; then
