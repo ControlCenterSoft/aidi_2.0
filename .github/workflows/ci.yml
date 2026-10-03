@@ -122,3 +122,38 @@ jobs:
           name: web-lockfile
           path: web/package-lock.json
           if-no-files-found: error
+
+  postgres:
+    if: github.event_name != 'pull_request' || github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate pinned PostgreSQL profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose -f deploy/dev/postgres.compose.yml config > /tmp/postgres-compose.yml
+          grep -F 'image: postgres:16.12-bookworm' /tmp/postgres-compose.yml
+          grep -F 'pg_isready -U aidi -d aidi' /tmp/postgres-compose.yml
+      - name: Start PostgreSQL 16 profile and wait for health
+        run: docker compose -f deploy/dev/postgres.compose.yml up -d --wait --wait-timeout 90 postgres
+      - name: Verify PostgreSQL health and version
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_id="$(docker compose -f deploy/dev/postgres.compose.yml ps -q postgres)"
+          test -n "$container_id"
+          test "$(docker inspect --format '{{.State.Health.Status}}' "$container_id")" = "healthy"
+          server_version="$(docker compose -f deploy/dev/postgres.compose.yml exec -T postgres psql -U aidi -d aidi -Atc 'SHOW server_version;')"
+          case "$server_version" in
+            16.12*) ;;
+            *) echo "unexpected PostgreSQL version: $server_version" >&2; exit 1 ;;
+          esac
+      - name: Show PostgreSQL diagnostics on failure
+        if: failure()
+        run: |
+          docker compose -f deploy/dev/postgres.compose.yml ps
+          docker compose -f deploy/dev/postgres.compose.yml logs --no-color postgres
+      - name: Stop PostgreSQL profile
+        if: always()
+        run: docker compose -f deploy/dev/postgres.compose.yml down --volumes --remove-orphans
