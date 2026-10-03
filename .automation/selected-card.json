@@ -1,8 +1,0 @@
-{
-  "issue": 124,
-  "stable_key": "A12-001",
-  "title": "[A12-001] Foundation unit-test baseline",
-  "main_sha": "11bf97f0d20a0bd037aadde386a33a4aa7282f81",
-  "selected_at": "2026-10-03T05:30:42Z",
-  "executor": "chatgpt-connector"
-}
