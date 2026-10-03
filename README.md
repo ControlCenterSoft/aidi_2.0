@@ -29,6 +29,19 @@ AIDI v2.0.0 — autonomous AI development infrastructure.
 - vLLM primary, llama.cpp fallback, optional Ollama adapter
 - OpenTelemetry Collector + Prometheus + Jaeger
 
+## Go bootstrap
+
+The Release A Go codebase uses the repository-root module `github.com/ControlCenterSoft/aidi_2.0` with Go 1.24.
+
+A0-003 establishes compile-only bootstrap entry points for the four Foundation binaries:
+
+- `cmd/aidi-control`
+- `cmd/aidi-node-agent`
+- `cmd/aidi-installer`
+- `cmd/aidi-admin`
+
+GitHub-hosted CI verifies module integrity and compiles each bootstrap entry point from a fresh checkout. Runtime behavior and reproducible release packaging are introduced by their later canonical Release A cards; these bootstrap entry points intentionally have no product behavior yet.
+
 ## Canonical project documents
 
 - [Technical specification](docs/SPEC.md)
