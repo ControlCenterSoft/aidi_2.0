@@ -1,6 +1,18 @@
 # PostgreSQL canonical state transaction contract
 
-Source: approved AIDI v2.0.0 SPEC §4.2.
+Source: approved AIDI v2.0.0 SPEC §4.1–§4.2.
+
+## Canonical objects
+
+`canonical_objects` is the Release A v1 storage envelope for canonical entities.
+
+- `object_kind` is restricted by a database CHECK constraint to the exact closed SPEC §4.1 `canonical.Kind` set.
+- `object_id` must be non-empty after trimming.
+- Persisted rows start at revision 1; revision 0 is only the repository boundary's expected revision for an object that does not yet exist.
+- `payload` is required JSONB and carries the entity-specific canonical document without weakening the common identifier/revision envelope.
+- `created_at` and `updated_at` are required, and `updated_at` cannot precede `created_at`.
+
+The composite primary key is `(object_kind, object_id)`, so the same textual ID may be used by different canonical kinds without collision.
 
 ## Mandatory command transaction
 

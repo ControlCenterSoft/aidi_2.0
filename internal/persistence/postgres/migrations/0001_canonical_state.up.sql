@@ -1,10 +1,39 @@
 BEGIN;
 
 CREATE TABLE canonical_objects (
-    object_kind TEXT NOT NULL,
-    object_id TEXT NOT NULL,
-    revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    object_kind TEXT NOT NULL CHECK (object_kind IN (
+        'installation',
+        'identity_user',
+        'workspace',
+        'project',
+        'specification',
+        'requirement',
+        'release',
+        'feature',
+        'task',
+        'workflow',
+        'attempt',
+        'change_set',
+        'verification',
+        'evidence',
+        'artifact',
+        'decision',
+        'approval',
+        'risk',
+        'change_request',
+        'problem',
+        'recovery_case',
+        'policy',
+        'resource',
+        'event_audit',
+        'operational_knowledge'
+    )),
+    object_id TEXT NOT NULL CHECK (btrim(object_id) <> ''),
+    revision BIGINT NOT NULL CHECK (revision > 0),
+    payload JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
+    CHECK (updated_at >= created_at),
     PRIMARY KEY (object_kind, object_id)
 );
 

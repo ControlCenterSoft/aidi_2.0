@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/ControlCenterSoft/aidi_2.0/internal/canonical"
 )
 
 func TestCanonicalStateMigrationContainsMandatoryInvariants(t *testing.T) {
@@ -15,6 +17,13 @@ func TestCanonicalStateMigrationContainsMandatoryInvariants(t *testing.T) {
 
 	required := []string{
 		"CREATE TABLE canonical_objects",
+		"object_kind TEXT NOT NULL CHECK (object_kind IN (",
+		"object_id TEXT NOT NULL CHECK (btrim(object_id) <> '')",
+		"revision BIGINT NOT NULL CHECK (revision > 0)",
+		"payload JSONB NOT NULL",
+		"created_at TIMESTAMPTZ NOT NULL",
+		"updated_at TIMESTAMPTZ NOT NULL",
+		"CHECK (updated_at >= created_at)",
 		"PRIMARY KEY (object_kind, object_id)",
 		"CREATE TABLE event_journal",
 		"UNIQUE (object_kind, object_id, revision)",
@@ -34,6 +43,39 @@ func TestCanonicalStateMigrationContainsMandatoryInvariants(t *testing.T) {
 	for _, fragment := range required {
 		if !strings.Contains(sql, fragment) {
 			t.Errorf("migration missing invariant %q", fragment)
+		}
+	}
+
+	canonicalKinds := []canonical.Kind{
+		canonical.KindInstallation,
+		canonical.KindIdentityUser,
+		canonical.KindWorkspace,
+		canonical.KindProject,
+		canonical.KindSpecification,
+		canonical.KindRequirement,
+		canonical.KindRelease,
+		canonical.KindFeature,
+		canonical.KindTask,
+		canonical.KindWorkflow,
+		canonical.KindAttempt,
+		canonical.KindChangeSet,
+		canonical.KindVerification,
+		canonical.KindEvidence,
+		canonical.KindArtifact,
+		canonical.KindDecision,
+		canonical.KindApproval,
+		canonical.KindRisk,
+		canonical.KindChangeRequest,
+		canonical.KindProblem,
+		canonical.KindRecoveryCase,
+		canonical.KindPolicy,
+		canonical.KindResource,
+		canonical.KindEventAudit,
+		canonical.KindOperationalKnowledge,
+	}
+	for _, kind := range canonicalKinds {
+		if !strings.Contains(sql, "'"+string(kind)+"'") {
+			t.Errorf("migration canonical kind constraint missing %q", kind)
 		}
 	}
 }
