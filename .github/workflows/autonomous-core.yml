@@ -380,6 +380,35 @@ jobs:
           echo "title=$title" >> "$GITHUB_OUTPUT"
           echo "Selected canonical READY card $key as GitHub Issue #$issue."
 
+      - name: Clear completed external handoff
+        if: steps.lease.outputs.acquired == 'true' && steps.previous.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          config=".automation/coding-provider.json"
+          test -f "$config"
+          handoff_path="$(jq -r '.handoff_path // ".automation/selected-card.json"' "$config")"
+          current="$(gh api "repos/$REPO/contents/$handoff_path?ref=automation-control" 2>/dev/null || true)"
+          [[ -n "$current" ]] || exit 0
+
+          current_sha="$(jq -r '.sha' <<<"$current")"
+          handoff="$(jq -r '.content' <<<"$current" | base64 -d)"
+          handoff_issue="$(jq -r '.issue // empty' <<<"$handoff")"
+          [[ "$handoff_issue" =~ ^[0-9]+$ ]] || {
+            echo "External handoff has no valid issue number; preserving it for explicit recovery." >&2
+            exit 0
+          }
+
+          issue_state="$(gh issue view "$handoff_issue" --repo "$REPO" --json state --jq '.state' 2>/dev/null || true)"
+          if [[ "$issue_state" == "CLOSED" ]]; then
+            gh api --method DELETE "repos/$REPO/contents/$handoff_path" \
+              -f message="chore(automation): clear completed external handoff #$handoff_issue" \
+              -f sha="$current_sha" \
+              -f branch="automation-control" >/dev/null
+            echo "Cleared completed external handoff for Issue #$handoff_issue."
+          fi
+
       - name: Check coding provider
         id: executor
         if: steps.plan.outputs.issue != ''

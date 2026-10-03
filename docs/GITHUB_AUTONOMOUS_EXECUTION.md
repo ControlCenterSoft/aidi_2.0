@@ -31,7 +31,7 @@ Acquisition creates `.automation/lease.active` without a prior blob SHA. GitHub 
 
 The workflow has watchdog start opportunities at `:08/:38`. Healthy write cycles may explicitly hand off to the next cycle through `workflow_dispatch`; watchdog starts are only a fallback. The existence-based lease and previous-work checks ensure that overlapping starts do not create parallel conflicting write cycles.
 
-The coding provider is controlled by `.automation/coding-provider.json`. The supported external provider is `chatgpt-connector`: Autonomous Core remains the canonical selector, lease/recovery authority and promotion controller, while it publishes the exact selected card to `automation-control:.automation/selected-card.json` for bounded implementation through the isolated ChatGPT GitHub connector. When `enabled=false`, product-write execution is intentionally paused.
+The coding provider is controlled by `.automation/coding-provider.json`. The supported external provider is `chatgpt-connector`: Autonomous Core remains the canonical selector, lease/recovery authority and promotion controller, while it publishes the exact selected card to `automation-control:.automation/selected-card.json` for bounded implementation through the isolated ChatGPT GitHub connector. When `enabled=false`, product-write execution is intentionally paused. A published handoff is active only while its canonical Issue remains open; Core removes a handoff that points to a completed Issue before publishing another card or declaring the GitHub-only queue idle.
 
 1. acquire the GitHub lease;
 2. verify that no previous automation PR or queued/in-progress CI is active;
