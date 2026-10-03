@@ -13,7 +13,7 @@ func TestLive(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 
-	Live(buildinfo.New("dev", "", "")).ServeHTTP(rec, req)
+	Live(buildinfo.New("dev", "", "", "")).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
@@ -27,7 +27,7 @@ func TestLive(t *testing.T) {
 }
 
 func TestReady(t *testing.T) {
-	build := buildinfo.New("dev", "", "")
+	build := buildinfo.New("dev", "", "", "")
 
 	ready := httptest.NewRecorder()
 	Ready(build, func() bool { return true }).ServeHTTP(

@@ -35,10 +35,37 @@ jobs:
           go build -trimpath -o /tmp/aidi-node-agent ./cmd/aidi-node-agent
           go build -trimpath -o /tmp/aidi-installer ./cmd/aidi-installer
           go build -trimpath -o /tmp/aidi-admin ./cmd/aidi-admin
-      - name: Build
+      - name: Release provenance metadata
+        shell: bash
         run: |
+          set -euo pipefail
+          build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          provenance="github:$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID@$GITHUB_SHA"
+          make release \
+            RELEASE_VERSION=ci \
+            RELEASE_COMMIT="$GITHUB_SHA" \
+            RELEASE_BUILD_TIME="$build_time" \
+            RELEASE_PROVENANCE="$provenance"
+          for name in aidi-control aidi-node-agent aidi-installer aidi-admin; do
+            metadata="$(dist/release/ci/$name --version)"
+            printf '%s\n' "$metadata" | grep -F "\"version\":\"ci\""
+            printf '%s\n' "$metadata" | grep -F "\"commit\":\"$GITHUB_SHA\""
+            printf '%s\n' "$metadata" | grep -F "\"build_time\":\"$build_time\""
+            printf '%s\n' "$metadata" | grep -F "\"provenance\":\"$provenance\""
+          done
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
           mkdir -p dist
-          go build -trimpath -ldflags "-X main.version=ci -X main.commit=${GITHUB_SHA} -X main.buildTime=ci" -o dist/aidi ./cmd/aidi
+          build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          provenance="github:$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID@$GITHUB_SHA"
+          go build -trimpath -ldflags "-X main.version=ci -X main.commit=$GITHUB_SHA -X main.buildTime=$build_time -X main.provenance=$provenance" -o dist/aidi ./cmd/aidi
+          metadata="$(dist/aidi --version)"
+          printf '%s\n' "$metadata" | grep -F "\"version\":\"ci\""
+          printf '%s\n' "$metadata" | grep -F "\"commit\":\"$GITHUB_SHA\""
+          printf '%s\n' "$metadata" | grep -F "\"build_time\":\"$build_time\""
+          printf '%s\n' "$metadata" | grep -F "\"provenance\":\"$provenance\""
           sha256sum dist/aidi > dist/aidi.sha256
       - name: Export qualification evidence
         uses: actions/upload-artifact@v4
@@ -47,6 +74,7 @@ jobs:
           path: |
             dist/aidi
             dist/aidi.sha256
+            dist/release/ci
             coverage.out
           if-no-files-found: error
 
