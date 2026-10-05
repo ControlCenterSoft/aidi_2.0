@@ -1,7 +1,7 @@
 {
   "last_fingerprint": "core_stale_without_durable_pr",
-  "repeat_count": 11,
+  "repeat_count": 12,
   "circuit_open": true,
   "last_outcome": "watchdog_resume_stale_core",
-  "updated_at": "2026-10-05T02:02:45Z"
+  "updated_at": "2026-10-05T09:09:25Z"
 }
