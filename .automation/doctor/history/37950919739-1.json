@@ -1,0 +1,9 @@
+{
+  "run_id": "37950919739",
+  "attempt": "1",
+  "fingerprint": "core_stale_without_durable_pr",
+  "outcome": "watchdog_resume_stale_core",
+  "kick_core": true,
+  "circuit_open": true,
+  "observed_at": "2026-10-09T15:20:11Z"
+}
